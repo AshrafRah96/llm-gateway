@@ -1,0 +1,33 @@
+# Secrets - NEVER include in image
+.env
+.env.*
+*.env
+
+# Git
+.git/
+.gitignore
+
+# Claude Code
+.claude/
+
+# Build artifacts
+llm-gateway.exe
+llm-gateway
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in runtime image)
+README.md
+*.md
+
+# Test files
+*_test.go
