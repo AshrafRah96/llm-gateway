@@ -76,6 +76,7 @@ func main() {
 		close(done)
 	}()
 
+	log.Println("Hello World")
 	log.Printf("listening on %s", server.Addr)
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("server: %v", err)
