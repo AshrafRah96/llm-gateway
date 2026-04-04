@@ -46,3 +46,9 @@ temp/
 
 # Debug
 __debug_bin
+# SpecVoice build inputs
+SPEC.md
+CONTEXT.md
+
+# Temporary scripts
+setup.sh

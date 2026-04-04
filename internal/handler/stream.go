@@ -6,10 +6,13 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ashrafrah96/llm-gateway/internal/observability"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
 )
 
 func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
+	observability.TotalRequests.Inc()
+
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)

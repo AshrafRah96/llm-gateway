@@ -45,6 +45,7 @@ func NewServer(h *Handler, mws ...middleware.Middleware) http.Handler {
 
 	mux.HandleFunc("GET /health", health)
 	mux.HandleFunc("GET /models", models)
+	mux.Handle("GET /metrics", observability.MetricsHandler())
 
 	return mux
 }
@@ -56,6 +57,7 @@ func health(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	observability.TotalRequests.Inc()
 
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -72,6 +74,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("cache error: %v", err)
 		} else if entry != nil {
+			observability.CacheHits.Inc()
 			observability.Log(observability.RequestLog{
 				Timestamp: start,
 				LatencyMs: time.Since(start).Milliseconds(),
@@ -96,6 +99,9 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tokensIn, tokensOut := observability.ParseTokens(body)
+	if tokensIn > 0 || tokensOut > 0 {
+		observability.TotalTokens.Add(float64(tokensIn + tokensOut))
+	}
 	cost := observability.CalculateCost(string(model), tokensIn, tokensOut)
 
 	if h.usage != nil {
