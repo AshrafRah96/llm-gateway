@@ -162,6 +162,11 @@ func TestChatStream_ProxiesSSE(t *testing.T) {
 	if !strings.HasSuffix(body, "data: [DONE]\n\n") {
 		t.Errorf("stream did not terminate with [DONE]: %s", body)
 	}
+	// The usage chunk is ours, for billing. It must not reach the client, whose stream
+	// should look exactly as it did before we started asking for it.
+	if strings.Contains(body, "prompt_tokens") {
+		t.Errorf("billing chunk leaked into the client stream: %s", body)
+	}
 }
 
 func TestChatStream_InvalidBody(t *testing.T) {
