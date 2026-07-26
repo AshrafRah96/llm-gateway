@@ -4,10 +4,10 @@ import "testing"
 
 func TestParseTokens(t *testing.T) {
 	tests := []struct {
-		name      string
-		body      []byte
-		wantIn    int
-		wantOut   int
+		name    string
+		body    []byte
+		wantIn  int
+		wantOut int
 	}{
 		{
 			name:    "valid response",
