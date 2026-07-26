@@ -12,6 +12,7 @@ import (
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
 	"github.com/ashrafrah96/llm-gateway/internal/observability"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
+	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
 const (
@@ -78,6 +79,7 @@ type Stream struct {
 	tokensOut int
 
 	complete bool  // saw [DONE]; a truncated stream must not be cached
+	metered  bool  // the provider reported usage; otherwise Close has to estimate
 	err      error // a read failure, kept distinct from a clean end of stream
 	done     bool
 	closed   bool
@@ -176,6 +178,7 @@ func (s *Stream) absorb(data string) (internalOnly bool) {
 
 	s.tokensIn = chunk.Usage.PromptTokens
 	s.tokensOut = chunk.Usage.CompletionTokens
+	s.metered = true
 
 	// Usage always arrives on a chunk with no choices. Should a provider ever attach it
 	// to one carrying content, forward it rather than swallow the content.
@@ -206,10 +209,21 @@ func (s *Stream) Close() error {
 		return nil
 	}
 
+	// No usage chunk means the client abandoned the stream: cancelling the request
+	// killed the upstream read before the provider could report. Tokens were still
+	// consumed — the prompt is charged in full, and whatever was generated before the
+	// cut is charged too — so estimate rather than record a zero that quietly writes
+	// off a real cost.
+	if !s.metered {
+		s.tokensIn = estimateTokens(s.req.Prompt)
+		s.tokensOut = estimateTokens(s.content.String())
+	}
+
 	entry.Model = s.model.ID
 	entry.TokensIn = s.tokensIn
 	entry.TokensOut = s.tokensOut
 	entry.CostUSD = s.model.Cost(s.tokensIn, s.tokensOut)
+	entry.Estimated = !s.metered
 	observability.Log(entry)
 
 	// A client that disconnects mid-stream still gets billed, so the metering and the
@@ -217,7 +231,13 @@ func (s *Stream) Close() error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), settleTimeout)
 	defer cancel()
 
-	s.c.meter(ctx, s.req.APIKey, s.model, s.tokensIn, s.tokensOut)
+	s.c.meter(ctx, usage.Entry{
+		APIKey:    s.req.APIKey,
+		TokensIn:  s.tokensIn,
+		TokensOut: s.tokensOut,
+		CostUSD:   s.model.Cost(s.tokensIn, s.tokensOut),
+		Estimated: !s.metered,
+	})
 
 	// Only a stream that reached [DONE] is a whole answer. Caching a truncated one
 	// would serve it to every semantically similar prompt from then on.
@@ -231,6 +251,20 @@ func (s *Stream) Close() error {
 		s.c.store(ctx, s.req.Prompt, body, http.StatusOK)
 	}
 	return nil
+}
+
+// estimateTokens approximates a token count for the fallback path where the provider
+// never reported one. Used only for abandoned streams, and every charge derived from it
+// is flagged usage.Entry.Estimated so it is never mistaken for a measurement.
+//
+// ponytail: ~4 bytes per token, the usual rule of thumb for English; it under-reads
+// CJK. Swap in a real BPE tokenizer if reconciliation against provider invoices shows
+// the drift matters.
+func estimateTokens(s string) int {
+	if s == "" {
+		return 0
+	}
+	return (len(s) + 3) / 4
 }
 
 // assemble turns the accumulated deltas into the body a non-streaming call would have

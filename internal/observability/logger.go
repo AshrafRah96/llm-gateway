@@ -15,7 +15,11 @@ type RequestLog struct {
 	TokensIn  int       `json:"tokens_in,omitempty"`
 	TokensOut int       `json:"tokens_out,omitempty"`
 	CostUSD   float64   `json:"cost_usd,omitempty"`
-	Status    int       `json:"status"`
+	// Estimated marks token counts inferred rather than reported by the provider,
+	// which happens when a client abandons a stream. The charge is real; the precision
+	// is not, and the log has to say so.
+	Estimated bool `json:"estimated,omitempty"`
+	Status    int  `json:"status"`
 }
 
 // Log emits one structured line. Pricing is the Model catalogue's job — callers pass

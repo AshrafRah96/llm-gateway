@@ -23,7 +23,7 @@ over a sliding window. Requests that get refused do not count against the limit,
 a caller that keeps retrying still recovers as soon as its earlier requests age out.
 
 **Tracks spend per API key.** Every request records its tokens and its cost in USD.
-Streamed requests are counted too.
+Streamed requests are counted too, including ones the caller abandons — see below.
 
 **Streams when you want it to.** `/chat/stream` forwards OpenAI's response as
 server-sent events. Streamed answers are cached and billed exactly like normal ones.
@@ -83,6 +83,32 @@ Send your key in the `X-API-Key` header.
 
 If OpenAI returns an error, the gateway passes its status code through unchanged, so a
 429 from OpenAI reaches you as a 429. Both `/chat` and `/chat/stream` behave the same way.
+
+### Abandoned streams
+
+If you stop reading a stream part way through, the gateway drops the connection to
+OpenAI, which stops generating. That saves money, but it also means OpenAI never sends
+its final token count — it arrives at the very end or not at all.
+
+Those tokens were still used. Your prompt was charged in full, and so was whatever got
+generated before the cut. Recording nothing would quietly write off a real cost, so the
+gateway estimates instead, from your prompt and the part of the answer it received.
+
+Estimates are approximate, and they are labelled. `/usage` reports how many of your
+requests were estimated:
+
+```json
+{
+  "requests": 1000,
+  "tokens_in": 45000,
+  "tokens_out": 90000,
+  "cost_usd": 12.34,
+  "estimated_requests": 3
+}
+```
+
+The request log marks them too, with `"estimated": true`. If a charge looks wrong, that
+tells you whether the number was measured or inferred.
 
 ## Setup
 
