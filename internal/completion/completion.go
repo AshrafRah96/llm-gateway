@@ -14,6 +14,7 @@ import (
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
 	"github.com/ashrafrah96/llm-gateway/internal/observability"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
+	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
 // Provider is the upstream model API. Satisfied by *provider.OpenAIClient in
@@ -31,7 +32,7 @@ type Cache interface {
 
 // Recorder meters a request against an API key. Satisfied by *usage.Tracker.
 type Recorder interface {
-	Record(ctx context.Context, apiKey string, tokensIn, tokensOut int, cost float64) error
+	Record(ctx context.Context, e usage.Entry) error
 }
 
 // UpstreamError reports that the provider answered with a non-success status. It carries
@@ -93,7 +94,12 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 	}
 
 	tokensIn, tokensOut := observability.ParseTokens(body)
-	c.meter(ctx, req.APIKey, model, tokensIn, tokensOut)
+	c.meter(ctx, usage.Entry{
+		APIKey:    req.APIKey,
+		TokensIn:  tokensIn,
+		TokensOut: tokensOut,
+		CostUSD:   model.Cost(tokensIn, tokensOut),
+	})
 
 	observability.Log(observability.RequestLog{
 		Timestamp: start,
@@ -132,8 +138,8 @@ func (c *Completion) store(ctx context.Context, prompt string, body []byte, stat
 
 // meter records the request even when the upstream failed: `requests` counts attempts,
 // and a failed body parses to zero tokens so it costs nothing.
-func (c *Completion) meter(ctx context.Context, apiKey string, m router.Model, in, out int) {
-	if err := c.usage.Record(ctx, apiKey, in, out, m.Cost(in, out)); err != nil {
+func (c *Completion) meter(ctx context.Context, e usage.Entry) {
+	if err := c.usage.Record(ctx, e); err != nil {
 		log.Printf("usage record error: %v", err)
 	}
 }

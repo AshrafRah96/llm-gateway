@@ -10,6 +10,7 @@ import (
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
+	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
 // ─────────────────────────── fakes ───────────────────────────
@@ -77,12 +78,14 @@ type fakeRecorder struct {
 	key       string
 	in, out   int
 	cost      float64
+	estimated bool
 	err       error
 }
 
-func (r *fakeRecorder) Record(ctx context.Context, apiKey string, tokensIn, tokensOut int, cost float64) error {
+func (r *fakeRecorder) Record(ctx context.Context, e usage.Entry) error {
 	r.calls++
-	r.key, r.in, r.out, r.cost = apiKey, tokensIn, tokensOut, cost
+	r.key, r.in, r.out = e.APIKey, e.TokensIn, e.TokensOut
+	r.cost, r.estimated = e.CostUSD, e.Estimated
 	return r.err
 }
 

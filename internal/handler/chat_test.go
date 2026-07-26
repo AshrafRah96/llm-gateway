@@ -13,6 +13,7 @@ import (
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
 	"github.com/ashrafrah96/llm-gateway/internal/completion"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
+	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
 // The handler tests drive a real completion module over fake collaborators, so they
@@ -50,9 +51,7 @@ func (c *fakeCache) Set(ctx context.Context, prompt string, response []byte, sta
 
 type fakeRecorder struct{}
 
-func (fakeRecorder) Record(ctx context.Context, key string, in, out int, cost float64) error {
-	return nil
-}
+func (fakeRecorder) Record(ctx context.Context, e usage.Entry) error { return nil }
 
 const upstreamBody = `{"choices":[{"message":{"content":"Paris"}}],"usage":{"prompt_tokens":10,"completion_tokens":20}}`
 

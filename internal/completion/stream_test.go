@@ -268,6 +268,87 @@ func TestStream_ReadErrorIsReported(t *testing.T) {
 	}
 }
 
+// Cancelling a stream kills the upstream read, so the provider's terminal usage chunk
+// never arrives. Recording zero would hide a cost we really incurred — the prompt was
+// charged in full and tokens were generated before the cut.
+func TestStream_AbandonedStreamIsEstimatedNotZero(t *testing.T) {
+	// Content chunks, then nothing: no usage chunk, no [DONE].
+	abandoned := `data: {"choices":[{"delta":{"content":"Paris is the capital"}}]}
+
+data: {"choices":[{"delta":{"content":" of France and also"}}]}
+`
+	prompt := "What is the capital of France, and what is it known for?"
+
+	p := &fakeProvider{sse: abandoned, status: http.StatusOK}
+	c, fc, fr := newFixture(p)
+
+	s, err := c.Stream(context.Background(), Request{APIKey: "k", Prompt: prompt})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	drain(t, s)
+	s.Close()
+
+	if fr.calls != 1 {
+		t.Fatalf("usage recorded %d times, want 1", fr.calls)
+	}
+	if !fr.estimated {
+		t.Error("an inferred charge must be marked estimated")
+	}
+	if fr.in == 0 {
+		t.Error("prompt tokens recorded as zero; the prompt is charged in full even on cancellation")
+	}
+	if fr.out == 0 {
+		t.Error("completion tokens recorded as zero; tokens were generated before the cut")
+	}
+	if fr.cost <= 0 {
+		t.Errorf("cost = %v, want a positive charge", fr.cost)
+	}
+
+	// Still not cached: an estimate is good enough to bill, not to serve.
+	if fc.sets != 0 {
+		t.Error("a truncated answer must not be cached")
+	}
+}
+
+func TestStream_CompletedStreamIsNotMarkedEstimated(t *testing.T) {
+	p := &fakeProvider{sse: sseBody, status: http.StatusOK}
+	c, _, fr := newFixture(p)
+
+	s, _ := c.Stream(context.Background(), Request{APIKey: "k", Prompt: "hi"})
+	drain(t, s)
+	s.Close()
+
+	if fr.estimated {
+		t.Error("a stream that reported real usage must not be marked estimated")
+	}
+	if fr.in != 10 || fr.out != 20 {
+		t.Errorf("recorded in=%d out=%d, want the reported 10/20", fr.in, fr.out)
+	}
+}
+
+func TestEstimateTokens(t *testing.T) {
+	if got := estimateTokens(""); got != 0 {
+		t.Errorf("estimateTokens(\"\") = %d, want 0", got)
+	}
+	// Roughly four characters per token, always at least one for non-empty input.
+	if got := estimateTokens("a"); got != 1 {
+		t.Errorf("estimateTokens(\"a\") = %d, want 1", got)
+	}
+	if got := estimateTokens("12345678"); got != 2 {
+		t.Errorf("estimateTokens(8 chars) = %d, want 2", got)
+	}
+	// Monotonic: more text never estimates fewer tokens.
+	prev := 0
+	for _, s := range []string{"a", "ab", "abcd", "abcdefgh", "abcdefghijklmnop"} {
+		got := estimateTokens(s)
+		if got < prev {
+			t.Errorf("estimateTokens(%q) = %d, less than the shorter string's %d", s, got, prev)
+		}
+		prev = got
+	}
+}
+
 func TestStream_ProviderError(t *testing.T) {
 	p := &fakeProvider{err: errors.New("dial tcp: refused")}
 	c, fc, fr := newFixture(p)
