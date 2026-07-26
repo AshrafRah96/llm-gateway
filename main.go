@@ -11,6 +11,7 @@ import (
 
 	"github.com/ashrafrah96/llm-gateway/internal/auth"
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
+	"github.com/ashrafrah96/llm-gateway/internal/completion"
 	"github.com/ashrafrah96/llm-gateway/internal/handler"
 	"github.com/ashrafrah96/llm-gateway/internal/middleware"
 	"github.com/ashrafrah96/llm-gateway/internal/provider"
@@ -49,7 +50,9 @@ func main() {
 	}
 
 	usageTracker := usage.NewTracker(redisClient)
-	h := handler.New(openaiClient, semanticCache, usageTracker, limiter)
+
+	completions := completion.New(openaiClient, semanticCache, usageTracker)
+	h := handler.New(completions, usageTracker, limiter)
 
 	mux := handler.NewServer(h,
 		middleware.Auth(keyStore),

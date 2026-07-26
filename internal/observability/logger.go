@@ -18,24 +18,9 @@ type RequestLog struct {
 	Status    int       `json:"status"`
 }
 
-var costPer1K = map[string]struct{ in, out float64 }{
-	"gpt-3.5-turbo": {0.0005, 0.0015},
-	"gpt-4":         {0.03, 0.06},
-}
-
-func CalculateCost(model string, tokensIn, tokensOut int) float64 {
-	costs, ok := costPer1K[model]
-	if !ok {
-		return 0
-	}
-	return (float64(tokensIn)/1000)*costs.in + (float64(tokensOut)/1000)*costs.out
-}
-
+// Log emits one structured line. Pricing is the Model catalogue's job — callers pass
+// the cost they already computed rather than having it recomputed here.
 func Log(r RequestLog) {
-	if r.TokensIn > 0 || r.TokensOut > 0 {
-		r.CostUSD = CalculateCost(r.Model, r.TokensIn, r.TokensOut)
-	}
-
 	data, err := json.Marshal(r)
 	if err != nil {
 		return
