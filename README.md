@@ -1,5 +1,7 @@
 # LLM Gateway
 
+[![CI](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml)
+
 A small server that sits between your app and OpenAI.
 
 Your app sends a prompt here instead of to OpenAI. The gateway checks the caller's
@@ -110,12 +112,19 @@ requests were estimated:
 The request log marks them too, with `"estimated": true`. If a charge looks wrong, that
 tells you whether the number was measured or inferred.
 
-## Setup
+## Running it
 
-You need Go 1.25+, an OpenAI API key, and Redis.
+The quickest way is compose, which brings up redis-stack alongside the gateway:
 
-Use **RedisStack**, not plain Redis. The cache needs the vector search commands, which
-only RedisStack has. Everything else works on plain Redis.
+```bash
+export OPENAI_API_KEY=sk-your-key
+docker compose up
+```
+
+The server listens on port 8080. RedisInsight is on 8001 if you want to look at what
+got cached.
+
+To run it directly you need Go 1.25+, an OpenAI key, and Redis:
 
 ```bash
 git clone https://github.com/ashrafrah96/llm-gateway
@@ -125,7 +134,9 @@ export REDIS_ADDR=localhost:6379
 go run main.go
 ```
 
-The server listens on port 8080.
+Use the redis-stack image rather than plain Redis. The cache needs vector search
+commands that only the stack has, and the gateway will not start without them.
+Everything else works on plain Redis.
 
 ### Adding an API key
 
@@ -185,15 +196,68 @@ curl http://localhost:8080/usage -H "X-API-Key: some-secret-key"
 go test ./...
 ```
 
-Most tests use fakes and need nothing running. The tests for the Redis parts skip
-themselves if no Redis is reachable. To run those too:
+Most tests use fakes and need nothing running. The ones covering Redis skip themselves
+when no Redis is reachable, so to run everything:
 
 ```bash
-REDIS_ADDR=localhost:6379 go test ./...
+docker run -d -p 6379:6379 redis:7-alpine
+REDIS_ADDR=localhost:6379 go test -race ./...
 ```
 
-Plain Redis is enough for the tests. Only the semantic cache needs RedisStack, and it
-has no tests yet for that reason.
+Plain Redis is enough. Only the semantic cache needs redis-stack, and that package has
+no tests for exactly that reason.
+
+CI runs the same thing and fails the build if the Redis-backed tests skip. A skipped test
+is how one of the bugs in
+[docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md) survived as long as it did.
+
+## Reviewing this
+
+If you are reading this to judge the code rather than to use it, these are the parts
+worth your time.
+
+Start with [internal/completion/stream.go](internal/completion/stream.go). It is the
+hardest thing in the repo: it forwards bytes to the client while accumulating the answer
+and the token counts, and it has to tell a finished stream apart from one that was cut
+off.
+
+Then [internal/ratelimit/redis.go](internal/ratelimit/redis.go), specifically the Lua
+script and the comment explaining why the timestamps are milliseconds. That comment is
+the fix for a bug that let roughly twelve times the configured rate through.
+
+[docs/adr/](docs/adr/) has the decisions and what was rejected.
+[docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md) writes up the two real bugs: how
+they were found, why the tests missed them, and what pins them now. That is probably the
+most useful thing here.
+
+For the tests, [internal/handler/abandoned_test.go](internal/handler/abandoned_test.go)
+is the one I would look at. It cancels a request mid stream against a real provider and
+checks the caller still gets billed.
+
+## Known limitations
+
+Things that are not done, so you do not have to go looking for them.
+
+**Never run against real OpenAI.** Every provider test uses a local fake. The request
+and response shapes match OpenAI's documentation, but documentation is not the wire. The
+end to end smoke test needs a real key and has not been run.
+
+**internal/cache has no tests.** It needs RediSearch, which plain Redis does not have,
+so testing it means a heavier container than CI currently runs. It is the only package
+without coverage.
+
+**The token estimate is unreconciled.** Abandoned streams are billed on a rough four
+bytes per token. Nobody has checked that against an actual OpenAI invoice, and it reads
+low for non-English text.
+
+**The cache is shared across API keys.** Good for hit rate, wrong the moment prompts
+contain anything private. See [adr/0002](docs/adr/0002-cache-on-meaning-not-exact-text.md).
+
+**The routing keyword list is a guess.** It has never been checked against real traffic
+to see how often it picks wrong.
+
+**Configuration is two environment variables.** Rate limits, the cache similarity
+threshold and the model prices are compile time constants.
 
 ## How the code is laid out
 
@@ -214,6 +278,9 @@ when the two had their own copies of the logic, the streaming one quietly stoppe
 caching and billing, and nobody noticed.
 
 ## Why it works this way
+
+The decisions with a real tradeoff behind them are written up in [docs/adr/](docs/adr/),
+including what got rejected. The short version:
 
 **Sliding window rate limiting.** A fixed window lets someone send a full window's
 worth of requests at the end of one window and again at the start of the next. A

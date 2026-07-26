@@ -1,0 +1,24 @@
+services:
+  redis:
+    # redis-stack, not plain redis: the semantic cache needs the vector search
+    # commands, which only the stack image has.
+    image: redis/redis-stack:latest
+    ports:
+      - "6379:6379"
+      - "8001:8001" # RedisInsight, handy for looking at what got cached
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gateway:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY before running compose}
+      REDIS_ADDR: redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
