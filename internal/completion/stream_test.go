@@ -45,7 +45,7 @@ func TestStream_PassesChunksThroughInOrder(t *testing.T) {
 	defer s.Close()
 
 	got := drain(t, s)
-	if len(got) != 4 {
+	if len(got) != 3 {
 		t.Fatalf("got %d chunks: %q", len(got), got)
 	}
 	if got[0] != `{"choices":[{"delta":{"content":"Par"}}]}` {
@@ -56,6 +56,42 @@ func TestStream_PassesChunksThroughInOrder(t *testing.T) {
 	}
 	if s.Model() != router.Cheap.ID {
 		t.Errorf("Model() = %q, want %q", s.Model(), router.Cheap.ID)
+	}
+}
+
+// We ask OpenAI for stream_options.include_usage so we can bill the stream. The client
+// did not ask for it, and never saw that chunk before we started requesting it. Its
+// choices array is empty, so forwarding it breaks any client that reads choices[0]
+// without checking the length.
+func TestStream_UsageChunkIsNotForwardedToTheClient(t *testing.T) {
+	p := &fakeProvider{sse: sseBody, status: http.StatusOK}
+	c, _, fr := newFixture(p)
+
+	s, err := c.Stream(context.Background(), Request{APIKey: "k", Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, data := range drain(t, s) {
+		if data == "[DONE]" {
+			continue
+		}
+		var chunk sseChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			t.Fatalf("chunk is not JSON: %v (%s)", err, data)
+		}
+		if len(chunk.Choices) == 0 {
+			t.Errorf("forwarded a chunk with no choices: %s", data)
+		}
+		if chunk.Usage != nil {
+			t.Errorf("forwarded our billing chunk to the client: %s", data)
+		}
+	}
+
+	// Swallowed, not ignored: the tokens still have to reach the meter.
+	s.Close()
+	if fr.in != 10 || fr.out != 20 {
+		t.Errorf("recorded in=%d out=%d, want 10/20", fr.in, fr.out)
 	}
 }
 

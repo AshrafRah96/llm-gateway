@@ -143,7 +143,12 @@ func (s *Stream) Next() (string, bool) {
 			return data, true
 		}
 
-		s.absorb(data)
+		// The terminal usage chunk exists because we asked for it, not because the
+		// client did, and it carries an empty choices array. Take its numbers and keep
+		// it out of the client's stream.
+		if s.absorb(data) {
+			continue
+		}
 		return data, true
 	}
 
@@ -155,18 +160,26 @@ func (s *Stream) Next() (string, bool) {
 }
 
 // absorb keeps the running answer and the token totals current as chunks go past.
-func (s *Stream) absorb(data string) {
+// It reports whether the chunk was ours alone — a usage report with nothing in it for
+// the client — in which case the caller must not forward it.
+func (s *Stream) absorb(data string) (internalOnly bool) {
 	var chunk sseChunk
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-		return
+		return false
 	}
 	for _, c := range chunk.Choices {
 		s.content.WriteString(c.Delta.Content)
 	}
-	if chunk.Usage != nil {
-		s.tokensIn = chunk.Usage.PromptTokens
-		s.tokensOut = chunk.Usage.CompletionTokens
+	if chunk.Usage == nil {
+		return false
 	}
+
+	s.tokensIn = chunk.Usage.PromptTokens
+	s.tokensOut = chunk.Usage.CompletionTokens
+
+	// Usage always arrives on a chunk with no choices. Should a provider ever attach it
+	// to one carrying content, forward it rather than swallow the content.
+	return len(chunk.Choices) == 0
 }
 
 // Close meters, logs and caches the exchange. Safe to call twice — handlers defer it.
