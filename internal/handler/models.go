@@ -3,8 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/ashrafrah96/llm-gateway/internal/router"
 )
 
+// ModelInfo is the wire shape of GET /models. It is deliberately separate from
+// router.Model so the catalogue can change without breaking the published contract.
 type ModelInfo struct {
 	ID           string  `json:"id"`
 	Description  string  `json:"description"`
@@ -12,22 +16,18 @@ type ModelInfo struct {
 	CostPer1KOut float64 `json:"cost_per_1k_output"`
 }
 
-var availableModels = []ModelInfo{
-	{
-		ID:           "gpt-3.5-turbo",
-		Description:  "Fast, good for simple tasks",
-		CostPer1KIn:  0.0005,
-		CostPer1KOut: 0.0015,
-	},
-	{
-		ID:           "gpt-4",
-		Description:  "Powerful, good for complex tasks",
-		CostPer1KIn:  0.03,
-		CostPer1KOut: 0.06,
-	},
-}
-
 func models(w http.ResponseWriter, r *http.Request) {
+	all := router.All()
+	out := make([]ModelInfo, 0, len(all))
+	for _, m := range all {
+		out = append(out, ModelInfo{
+			ID:           m.ID,
+			Description:  m.Description,
+			CostPer1KIn:  m.PriceIn,
+			CostPer1KOut: m.PriceOut,
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(availableModels)
+	json.NewEncoder(w).Encode(out)
 }

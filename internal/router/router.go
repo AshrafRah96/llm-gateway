@@ -2,13 +2,6 @@ package router
 
 import "strings"
 
-type Model string
-
-const (
-	ModelCheap    Model = "gpt-3.5-turbo"
-	ModelPowerful Model = "gpt-4"
-)
-
 var complexKeywords = []string{
 	"analyze",
 	"compare",
@@ -27,14 +20,14 @@ func Route(prompt string) Model {
 	lower := strings.ToLower(prompt)
 
 	if len(prompt) > 500 {
-		return ModelPowerful
+		return Powerful
 	}
 
 	for _, kw := range complexKeywords {
 		if strings.Contains(lower, kw) {
-			return ModelPowerful
+			return Powerful
 		}
 	}
 
-	return ModelCheap
+	return Cheap
 }

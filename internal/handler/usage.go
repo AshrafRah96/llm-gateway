@@ -1,13 +1,19 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
 	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
-func usageHandler(tracker *usage.Tracker) http.HandlerFunc {
+// StatsReader is satisfied by *usage.Tracker in production and by a fake in tests.
+type StatsReader interface {
+	Get(ctx context.Context, apiKey string) (*usage.Stats, error)
+}
+
+func usageHandler(tracker StatsReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		apiKey := r.Header.Get("X-API-Key")
 		if apiKey == "" {

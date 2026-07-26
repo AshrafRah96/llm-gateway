@@ -1,66 +1,53 @@
 package handler
 
 import (
-	"bufio"
-	"encoding/json"
+	"errors"
 	"net/http"
-	"strings"
 
-	"github.com/ashrafrah96/llm-gateway/internal/router"
+	"github.com/ashrafrah96/llm-gateway/internal/completion"
 )
 
 func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
-	var req ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	if req.Prompt == "" {
-		http.Error(w, "prompt is required", http.StatusBadRequest)
+	req, ok := decode(w, r)
+	if !ok {
 		return
 	}
 
-	model := router.Route(req.Prompt)
-
-	stream, status, err := h.client.CallStream(req.Prompt, string(model))
-	if err != nil {
-		http.Error(w, "upstream error", http.StatusBadGateway)
-		return
-	}
-	defer stream.Close()
-
-	if status != http.StatusOK {
-		http.Error(w, "upstream error", status)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Model", string(model))
-
+	// Checked before the upstream call so a client that cannot be streamed to does not
+	// cost us a completion.
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
 
-	scanner := bufio.NewScanner(stream)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
+	stream, err := h.completion.Stream(r.Context(), req)
+	if err != nil {
+		// Propagate the upstream status, exactly as /chat does. A client that gets 429
+		// can back off; one that gets 502 cannot.
+		var upstream *completion.UpstreamError
+		if errors.As(err, &upstream) {
+			http.Error(w, "upstream error", upstream.Status)
+			return
 		}
+		http.Error(w, "upstream error", http.StatusBadGateway)
+		return
+	}
+	// Close is what meters, logs and caches the stream.
+	defer stream.Close()
 
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				w.Write([]byte("data: [DONE]\n\n"))
-				flusher.Flush()
-				break
-			}
-			w.Write([]byte("data: " + data + "\n\n"))
-			flusher.Flush()
-		}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	if stream.CacheHit() {
+		w.Header().Set("X-Cache", "HIT")
+	} else {
+		w.Header().Set("X-Cache", "MISS")
+		w.Header().Set("X-Model", stream.Model())
+	}
+
+	for data, ok := stream.Next(); ok; data, ok = stream.Next() {
+		w.Write([]byte("data: " + data + "\n\n"))
+		flusher.Flush()
 	}
 }
