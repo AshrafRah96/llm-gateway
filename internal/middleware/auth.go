@@ -1,12 +1,16 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
-
-	"github.com/ashrafrah96/llm-gateway/internal/auth"
 )
 
-func Auth(store *auth.KeyStore) Middleware {
+// KeyValidator is satisfied by *auth.KeyStore in production and by a fake in tests.
+type KeyValidator interface {
+	Valid(ctx context.Context, apiKey string) (bool, error)
+}
+
+func Auth(store KeyValidator) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			apiKey := r.Header.Get("X-API-Key")
