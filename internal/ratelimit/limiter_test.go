@@ -6,64 +6,173 @@ import (
 	"time"
 )
 
-type mockStore struct {
-	count int
+// ponytail: real sleeps rather than an injected clock; add one if these get flaky.
+const testWindow = 50 * time.Millisecond
+
+// Timings for the rejected-requests-do-not-extend-the-window test, which needs margin
+// on both sides of its assertion:
+//
+//	hammerFor + settleFor > hammerWindow  — the accepted requests must expire, so a
+//	                                        correct limiter lets the key recover;
+//	settleFor             < hammerWindow  — a wrongly recorded rejection would still
+//	                                        be inside the window, so a broken one does not.
+//
+// A longer window than testWindow keeps both margins (60ms and 40ms) well clear of
+// scheduler jitter.
+const (
+	hammerWindow = 200 * time.Millisecond
+	hammerFor    = hammerWindow / 2
+	settleFor    = hammerWindow * 4 / 5
+)
+
+func testLimiter(max int) *Limiter {
+	return New(NewMemoryStore(), Config{MaxRequests: max, Window: testWindow})
 }
 
-func (m *mockStore) Increment(ctx context.Context, key string, window time.Duration) (int, error) {
-	m.count++
-	return m.count, nil
-}
-
-func (m *mockStore) Count(ctx context.Context, key string, window time.Duration) (int, error) {
-	return m.count, nil
-}
-
-func TestLimiter_Allow(t *testing.T) {
-	store := &mockStore{}
-	limiter := New(store, Config{MaxRequests: 3, Window: time.Minute})
-
+func TestLimiter_AllowsUpToTheLimit(t *testing.T) {
+	l := testLimiter(3)
 	ctx := context.Background()
 
-	// First 3 requests should be allowed
-	for i := 0; i < 3; i++ {
-		allowed, _, err := limiter.Allow(ctx, "test-key")
+	for i := 1; i <= 3; i++ {
+		allowed, _, err := l.Allow(ctx, "k")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if !allowed {
-			t.Errorf("request %d should be allowed", i+1)
+			t.Errorf("request %d should be allowed", i)
 		}
 	}
 
-	// 4th request should be denied
-	allowed, retryAfter, err := limiter.Allow(ctx, "test-key")
+	allowed, retryAfter, err := l.Allow(ctx, "k")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if allowed {
 		t.Error("4th request should be denied")
 	}
-	if retryAfter != time.Minute {
-		t.Errorf("retryAfter = %v, want %v", retryAfter, time.Minute)
+	if retryAfter <= 0 || retryAfter > testWindow {
+		t.Errorf("retryAfter = %v, want a positive value no larger than %v", retryAfter, testWindow)
 	}
 }
 
-func TestLimiter_Status(t *testing.T) {
-	store := &mockStore{count: 5}
-	limiter := New(store, Config{MaxRequests: 10, Window: time.Minute})
+// The bug the old mock could not see: every rejected attempt used to be recorded, so a
+// client that kept retrying kept pushing its own lockout forward and never recovered.
+func TestLimiter_RejectedRequestsDoNotExtendTheWindow(t *testing.T) {
+	l := New(NewMemoryStore(), Config{MaxRequests: 2, Window: hammerWindow})
+	ctx := context.Background()
 
-	count, max, window, err := limiter.Status(context.Background(), "test-key")
+	l.Allow(ctx, "k")
+	l.Allow(ctx, "k")
+
+	start := time.Now()
+	for time.Since(start) < hammerFor {
+		if allowed, _, _ := l.Allow(ctx, "k"); allowed {
+			t.Fatal("requests over the limit must be denied")
+		}
+	}
+
+	time.Sleep(settleFor)
+
+	allowed, _, err := l.Allow(ctx, "k")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if count != 5 {
-		t.Errorf("count = %d, want 5", count)
+	if !allowed {
+		t.Fatal("key never recovered: rejected attempts are still consuming budget")
 	}
-	if max != 10 {
-		t.Errorf("max = %d, want 10", max)
+}
+
+func TestLimiter_WindowSlides(t *testing.T) {
+	l := testLimiter(1)
+	ctx := context.Background()
+
+	if allowed, _, _ := l.Allow(ctx, "k"); !allowed {
+		t.Fatal("first request should be allowed")
 	}
-	if window != time.Minute {
-		t.Errorf("window = %v, want %v", window, time.Minute)
+	if allowed, _, _ := l.Allow(ctx, "k"); allowed {
+		t.Fatal("second request should be denied")
+	}
+
+	time.Sleep(testWindow + 10*time.Millisecond)
+
+	if allowed, _, _ := l.Allow(ctx, "k"); !allowed {
+		t.Error("request should be allowed once the window has passed")
+	}
+}
+
+func TestLimiter_KeysAreIndependent(t *testing.T) {
+	l := testLimiter(1)
+	ctx := context.Background()
+
+	l.Allow(ctx, "a")
+	if allowed, _, _ := l.Allow(ctx, "b"); !allowed {
+		t.Error("one key's usage must not limit another")
+	}
+}
+
+// Status reports accepted requests, not attempts.
+func TestLimiter_StatusCountsAcceptedOnly(t *testing.T) {
+	l := testLimiter(2)
+	ctx := context.Background()
+
+	l.Allow(ctx, "k")
+	l.Allow(ctx, "k")
+	l.Allow(ctx, "k") // denied
+	l.Allow(ctx, "k") // denied
+
+	count, max, window, err := l.Status(ctx, "k")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("count = %d, want 2 (denied attempts must not be counted)", count)
+	}
+	if max != 2 {
+		t.Errorf("max = %d, want 2", max)
+	}
+	if window != testWindow {
+		t.Errorf("window = %v, want %v", window, testWindow)
+	}
+}
+
+func TestMemoryStore_ExpiresEntries(t *testing.T) {
+	s := NewMemoryStore()
+	ctx := context.Background()
+
+	if _, _, err := s.Allow(ctx, "k", 1, testWindow); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count, _ := s.Count(ctx, "k", testWindow); count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+
+	time.Sleep(testWindow + 10*time.Millisecond)
+
+	if count, _ := s.Count(ctx, "k", testWindow); count != 0 {
+		t.Errorf("count = %d after the window, want 0", count)
+	}
+}
+
+func TestMemoryStore_ConcurrentAllowRespectsTheLimit(t *testing.T) {
+	s := NewMemoryStore()
+	ctx := context.Background()
+
+	const limit, callers = 5, 50
+	results := make(chan bool, callers)
+	for range callers {
+		go func() {
+			allowed, _, _ := s.Allow(ctx, "k", limit, time.Minute)
+			results <- allowed
+		}()
+	}
+
+	granted := 0
+	for range callers {
+		if <-results {
+			granted++
+		}
+	}
+	if granted != limit {
+		t.Errorf("granted %d of %d concurrent requests, want exactly %d", granted, callers, limit)
 	}
 }
