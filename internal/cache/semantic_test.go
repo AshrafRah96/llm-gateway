@@ -113,14 +113,14 @@ func TestSemanticCacheSearchFailureIsReturned(t *testing.T) {
 	}
 }
 
-func TestParseSearchResultRESP3(t *testing.T) {
+func TestParseSearchResult(t *testing.T) {
 	c := &SemanticCache{}
-	results := map[interface{}]interface{}{
-		"total_results": int64(1),
-		"results": []interface{}{
-			map[interface{}]interface{}{
-				"id": "cache:v2:key",
-				"extra_attributes": map[interface{}]interface{}{
+	results := redis.FTSearchResult{
+		Total: 1,
+		Docs: []redis.Document{
+			{
+				ID: "cache:v2:key",
+				Fields: map[string]string{
 					"data":  `{"prompt":"p","response":"UGFyaXM=","status":200}`,
 					"score": "0.01",
 				},
@@ -137,13 +137,13 @@ func TestParseSearchResultRESP3(t *testing.T) {
 	}
 }
 
-func TestParseSearchResultRESP3RejectsMalformedData(t *testing.T) {
+func TestParseSearchResultRejectsMalformedData(t *testing.T) {
 	c := &SemanticCache{}
-	results := map[interface{}]interface{}{
-		"total_results": int64(1),
-		"results": []interface{}{
-			map[interface{}]interface{}{
-				"extra_attributes": map[interface{}]interface{}{
+	results := redis.FTSearchResult{
+		Total: 1,
+		Docs: []redis.Document{
+			{
+				Fields: map[string]string{
 					"data":  "{not-json",
 					"score": "0",
 				},
@@ -156,14 +156,14 @@ func TestParseSearchResultRESP3RejectsMalformedData(t *testing.T) {
 	}
 }
 
-func TestParseSearchResultRESP3TreatsExpiredDocumentAsMiss(t *testing.T) {
+func TestParseSearchResultTreatsExpiredDocumentAsMiss(t *testing.T) {
 	c := &SemanticCache{}
-	results := map[interface{}]interface{}{
-		"total_results": int64(1),
-		"results": []interface{}{
-			map[interface{}]interface{}{
-				"id":               "cache:v2:expired",
-				"extra_attributes": map[interface{}]interface{}{},
+	results := redis.FTSearchResult{
+		Total: 1,
+		Docs: []redis.Document{
+			{
+				ID:     "cache:v2:expired",
+				Fields: map[string]string{"score": "0"},
 			},
 		},
 	}
