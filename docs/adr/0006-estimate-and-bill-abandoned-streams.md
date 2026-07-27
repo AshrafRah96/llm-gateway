@@ -36,6 +36,10 @@ Record the charge, and mark it:
   were inferred
 - the request log carries `"estimated": true`
 
+Normal provider exhaustion settles immediately. The HTTP handler also defers `Close`;
+if the client abandons the stream first, that call crosses the same idempotent
+settlement path with a bounded context detached from the cancelled request.
+
 ## Consequences
 
 Abandoned streams appear in billing instead of vanishing.

@@ -1,6 +1,5 @@
-// Package completion owns what a chat request does: look in the cache, pick a model,
-// call the provider, meter the result, log it, store it. Both HTTP entry points cross
-// this one interface, so neither can drift from the other.
+// Package completion owns what a chat request does: route, cache, call the provider,
+// meter, log, and store. Both delivery modes cross this one interface.
 package completion
 
 import (
@@ -16,11 +15,9 @@ import (
 	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
-// Provider is the upstream model API. Satisfied by *provider.OpenAIClient in
-// production and by a fake in tests.
 type Provider interface {
-	Complete(ctx context.Context, prompt string, m router.Model) ([]byte, int, error)
-	Stream(ctx context.Context, prompt string, m router.Model) (ProviderStream, int, error)
+	Complete(ctx context.Context, prompt string, model router.Model) ([]byte, int, error)
+	Stream(ctx context.Context, prompt string, model router.Model) (ProviderStream, int, error)
 }
 
 type ProviderUsage struct {
@@ -40,21 +37,14 @@ type ProviderStream interface {
 	Close() error
 }
 
-// Cache is the semantic prompt cache. Satisfied by *cache.SemanticCache.
 type Cache interface {
-	Begin(ctx context.Context, ns cache.Namespace, prompt string) (cache.Attempt, error)
+	Begin(ctx context.Context, namespace cache.Namespace, prompt string) (cache.Attempt, error)
 }
 
-// Recorder meters a request against an API key. Satisfied by *usage.Tracker.
 type Recorder interface {
-	Record(ctx context.Context, e usage.Entry) error
+	Record(ctx context.Context, entry usage.Entry) error
 }
 
-// UpstreamError reports that the provider answered with a non-success status. It carries
-// the status so adapters can propagate it instead of flattening everything to 502 —
-// a client that receives 429 can back off; one that receives 502 cannot.
-//
-// A transport failure (no response at all) is a plain error, not this.
 type UpstreamError struct {
 	Status int
 }
@@ -71,7 +61,7 @@ type Request struct {
 type Response struct {
 	Body     []byte
 	Status   int
-	Model    string // empty on a cache hit because this request made no provider call
+	Model    string
 	CacheHit bool
 }
 
@@ -81,76 +71,46 @@ type Completion struct {
 	usage    Recorder
 }
 
-// New requires all three collaborators. There are no nil checks downstream because
-// there is no way to build a Completion without them.
-func New(p Provider, c Cache, u Recorder) *Completion {
-	return &Completion{provider: p, cache: c, usage: u}
+// lifecycle concentrates the policy shared by buffered and streaming delivery.
+type lifecycle struct {
+	completion *Completion
+	ctx        context.Context
+	req        Request
+	model      router.Model
+	namespace  cache.Namespace
+	attempt    cache.Attempt
+	started    time.Time
 }
 
-func (c *Completion) Complete(ctx context.Context, req Request) (Response, error) {
-	start := time.Now()
+func New(provider Provider, cache Cache, usage Recorder) *Completion {
+	return &Completion{provider: provider, cache: cache, usage: usage}
+}
+
+func (c *Completion) begin(ctx context.Context, req Request) *lifecycle {
 	model := router.Route(req.Prompt)
-	ns := cache.NewNamespace(req.APIKey, model.ID)
-	attempt := c.beginCacheAttempt(ctx, ns, req.Prompt)
-
-	if entry := c.lookup(ctx, attempt); entry != nil {
-		observability.Log(observability.RequestLog{
-			Timestamp: start,
-			LatencyMs: time.Since(start).Milliseconds(),
-			CacheHit:  true,
-			PromptLen: len(req.Prompt),
-			Status:    entry.Status,
-		})
-		return Response{Body: entry.Response, Status: entry.Status, CacheHit: true}, nil
+	l := &lifecycle{
+		completion: c,
+		ctx:        ctx,
+		req:        req,
+		model:      model,
+		namespace:  cache.NewNamespace(req.APIKey, model.ID),
+		started:    time.Now(),
 	}
 
-	body, status, err := c.provider.Complete(ctx, req.Prompt, model)
-	if err != nil {
-		return Response{}, err
-	}
-
-	tokensIn, tokensOut := observability.ParseTokens(body)
-	c.meter(ctx, usage.Entry{
-		APIKey:    req.APIKey,
-		TokensIn:  tokensIn,
-		TokensOut: tokensOut,
-		CostUSD:   model.Cost(tokensIn, tokensOut),
-	})
-
-	observability.Log(observability.RequestLog{
-		Timestamp: start,
-		LatencyMs: time.Since(start).Milliseconds(),
-		Model:     model.ID,
-		PromptLen: len(req.Prompt),
-		TokensIn:  tokensIn,
-		TokensOut: tokensOut,
-		CostUSD:   model.Cost(tokensIn, tokensOut),
-		Status:    status,
-	})
-
-	if status == http.StatusOK {
-		c.store(ctx, attempt, body, status)
-	}
-
-	return Response{Body: body, Status: status, Model: model.ID}, nil
-}
-
-// lookup returns nil on a miss. A cache failure degrades to a miss rather than
-// failing the request — the upstream call is the source of truth.
-func (c *Completion) beginCacheAttempt(ctx context.Context, ns cache.Namespace, prompt string) cache.Attempt {
-	attempt, err := c.cache.Begin(ctx, ns, prompt)
+	attempt, err := c.cache.Begin(ctx, l.namespace, req.Prompt)
 	if err != nil {
 		log.Printf("cache error: %v", err)
-		return nil
+		return l
 	}
-	return attempt
+	l.attempt = attempt
+	return l
 }
 
-func (c *Completion) lookup(ctx context.Context, attempt cache.Attempt) *cache.CacheEntry {
-	if attempt == nil {
+func (l *lifecycle) lookup(ctx context.Context) *cache.CacheEntry {
+	if l.attempt == nil {
 		return nil
 	}
-	entry, err := attempt.Get(ctx)
+	entry, err := l.attempt.Get(ctx)
 	if err != nil {
 		log.Printf("cache error: %v", err)
 		return nil
@@ -158,19 +118,63 @@ func (c *Completion) lookup(ctx context.Context, attempt cache.Attempt) *cache.C
 	return entry
 }
 
-func (c *Completion) store(ctx context.Context, attempt cache.Attempt, body []byte, status int) {
-	if attempt == nil {
+func (l *lifecycle) store(ctx context.Context, body []byte, status int) {
+	if l.attempt == nil {
 		return
 	}
-	if err := attempt.Set(ctx, body, status); err != nil {
+	if err := l.attempt.Set(ctx, body, status); err != nil {
 		log.Printf("cache store error: %v", err)
 	}
 }
 
-// meter records the request even when the upstream failed: `requests` counts attempts,
-// and a failed body parses to zero tokens so it costs nothing.
-func (c *Completion) meter(ctx context.Context, e usage.Entry) {
-	if err := c.usage.Record(ctx, e); err != nil {
+func (l *lifecycle) meter(ctx context.Context, entry usage.Entry) {
+	if err := l.completion.usage.Record(ctx, entry); err != nil {
 		log.Printf("usage record error: %v", err)
 	}
+}
+
+func (l *lifecycle) log(entry observability.RequestLog) {
+	entry.Timestamp = l.started
+	entry.LatencyMs = time.Since(l.started).Milliseconds()
+	entry.PromptLen = len(l.req.Prompt)
+	observability.Log(entry)
+}
+
+func (c *Completion) Complete(ctx context.Context, req Request) (Response, error) {
+	l := c.begin(ctx, req)
+
+	if entry := l.lookup(ctx); entry != nil {
+		l.log(observability.RequestLog{
+			CacheHit: true,
+			Status:   entry.Status,
+		})
+		return Response{Body: entry.Response, Status: entry.Status, CacheHit: true}, nil
+	}
+
+	body, status, err := c.provider.Complete(ctx, req.Prompt, l.model)
+	if err != nil {
+		return Response{}, err
+	}
+
+	tokensIn, tokensOut := observability.ParseTokens(body)
+	cost := l.model.Cost(tokensIn, tokensOut)
+	l.meter(ctx, usage.Entry{
+		APIKey:    req.APIKey,
+		TokensIn:  tokensIn,
+		TokensOut: tokensOut,
+		CostUSD:   cost,
+	})
+	l.log(observability.RequestLog{
+		Model:     l.model.ID,
+		TokensIn:  tokensIn,
+		TokensOut: tokensOut,
+		CostUSD:   cost,
+		Status:    status,
+	})
+
+	if status == http.StatusOK {
+		l.store(ctx, body, status)
+	}
+
+	return Response{Body: body, Status: status, Model: l.model.ID}, nil
 }
