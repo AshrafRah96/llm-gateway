@@ -15,7 +15,6 @@ import (
 
 type fakeProvider struct {
 	body    []byte
-	sse     string
 	events  []ProviderEvent
 	readErr error
 	status  int
