@@ -65,7 +65,7 @@ func ParseTTL(value string) (time.Duration, error) {
 	return ttl, nil
 }
 
-func NewSemanticCache(client *redis.Client, embedder Embedder, ttl time.Duration) (*SemanticCache, error) {
+func NewSemanticCache(ctx context.Context, client *redis.Client, embedder Embedder, ttl time.Duration) (*SemanticCache, error) {
 	if ttl <= 0 {
 		return nil, fmt.Errorf("cache TTL must be greater than zero")
 	}
@@ -74,15 +74,13 @@ func NewSemanticCache(client *redis.Client, embedder Embedder, ttl time.Duration
 		embedder: embedder,
 		ttl:      ttl,
 	}
-	if err := cache.createIndex(); err != nil {
+	if err := cache.createIndex(ctx); err != nil {
 		return nil, err
 	}
 	return cache, nil
 }
 
-func (c *SemanticCache) createIndex() error {
-	ctx := context.Background()
-
+func (c *SemanticCache) createIndex(ctx context.Context) error {
 	_, err := c.client.Do(ctx, "FT.INFO", indexName).Result()
 	if err == nil {
 		return nil

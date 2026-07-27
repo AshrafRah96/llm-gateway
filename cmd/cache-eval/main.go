@@ -64,7 +64,12 @@ func run() error {
 
 	client := redis.NewClient(&redis.Options{Addr: redisAddr, Protocol: 2})
 	defer client.Close()
-	semanticCache, err := cache.NewSemanticCache(client, cache.NewEmbeddingClient(apiKey), ttl)
+	semanticCache, err := cache.NewSemanticCache(
+		context.Background(),
+		client,
+		cache.NewEmbeddingClient(apiKey),
+		ttl,
+	)
 	if err != nil {
 		return fmt.Errorf("create semantic cache: %w", err)
 	}

@@ -33,6 +33,7 @@ so an answer produced for one model cannot silently stand in for another.
 
 | Module | Interface seen by callers | Complexity hidden behind it |
 |---|---|---|
+| `application` | Load configuration or build the application | Validation, concrete adapter graph, Redis ownership and HTTP server |
 | `completion` | Complete or stream one request | Routing, caching, provider calls, metering and logging |
 | `cache` | Begin one attempt within a namespace | One reusable embedding, Redis Search, similarity policy, TTL and schema versioning |
 | `ratelimit` | Allow and status | Sliding-window state and atomic Redis Lua execution |
@@ -52,6 +53,17 @@ path only as the fallback for an abandoned stream.
 
 The cache and rate limiter each have real adapter seams. Production uses Redis and
 OpenAI; tests use deterministic adapters without external calls.
+
+## Startup and shutdown
+
+`internal/application` parses the three environment settings, validates configuration,
+constructs the concrete adapter graph and returns the HTTP server. Redis uses RESP2,
+connectivity is checked before serving, and semantic-cache index creation receives the
+same bounded startup context. The application owns and closes the Redis client.
+
+`main` owns only process lifecycle: a ten-second startup budget, signal handling,
+listening, a thirty-second graceful shutdown budget and application cleanup. Startup
+errors return through the application interface before `main` decides to exit.
 
 ## Semantic-cache namespace
 

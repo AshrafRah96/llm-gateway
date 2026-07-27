@@ -183,6 +183,28 @@ func TestSemanticCacheSearchFailureIsReturned(t *testing.T) {
 	}
 }
 
+func TestNewSemanticCacheHonorsStartupContext(t *testing.T) {
+	client := redis.NewClient(&redis.Options{
+		Addr:       "127.0.0.1:0",
+		MaxRetries: -1,
+		Protocol:   2,
+	})
+	t.Cleanup(func() { client.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := NewSemanticCache(
+		ctx,
+		client,
+		fixedEmbedder{vector: testVector(0)},
+		time.Hour,
+	)
+	if err == nil || !strings.Contains(err.Error(), context.Canceled.Error()) {
+		t.Fatalf("NewSemanticCache error = %v, want context cancellation", err)
+	}
+}
+
 func TestParseSearchResult(t *testing.T) {
 	c := &SemanticCache{}
 	results := redis.FTSearchResult{
