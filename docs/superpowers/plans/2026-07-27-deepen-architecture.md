@@ -514,7 +514,9 @@ Pass `ctx` into `NewSemanticCache` and `createIndex`; remove `context.Background
 
 - [ ] **Step 5: Reduce main to process lifecycle**
 
-Use `LoadConfig(os.Getenv)`, `application.New(context.Background(), cfg)`, signal-driven `Server.Shutdown`, `Server.ListenAndServe`, and deferred `Application.Close`.
+Use `LoadConfig(os.Getenv)`, a ten-second startup context for `application.New`,
+signal-driven `Server.Shutdown`, `Server.ListenAndServe`, and deferred
+`Application.Close`.
 
 - [ ] **Step 6: Run affected tests and verify green**
 

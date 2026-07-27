@@ -34,7 +34,7 @@ func redisSearchClient(t *testing.T) *redis.Client {
 
 func newIntegrationCache(t *testing.T, client *redis.Client, embedder Embedder, ttl time.Duration) *SemanticCache {
 	t.Helper()
-	c, err := NewSemanticCache(client, embedder, ttl)
+	c, err := NewSemanticCache(context.Background(), client, embedder, ttl)
 	if err != nil {
 		t.Fatalf("NewSemanticCache: %v", err)
 	}

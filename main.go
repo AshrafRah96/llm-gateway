@@ -9,67 +9,33 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ashrafrah96/llm-gateway/internal/auth"
-	"github.com/ashrafrah96/llm-gateway/internal/cache"
-	"github.com/ashrafrah96/llm-gateway/internal/completion"
-	"github.com/ashrafrah96/llm-gateway/internal/handler"
-	"github.com/ashrafrah96/llm-gateway/internal/middleware"
-	"github.com/ashrafrah96/llm-gateway/internal/provider"
-	"github.com/ashrafrah96/llm-gateway/internal/ratelimit"
-	"github.com/ashrafrah96/llm-gateway/internal/usage"
-	"github.com/redis/go-redis/v9"
+	"github.com/ashrafrah96/llm-gateway/internal/application"
 )
 
-const shutdownTimeout = 30 * time.Second
+const (
+	startupTimeout  = 10 * time.Second
+	shutdownTimeout = 30 * time.Second
+)
 
 func main() {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		log.Fatal("OPENAI_API_KEY not set")
-	}
-
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
-	}
-
-	// RediSearch's typed responses are stable under RESP2; go-redis still marks
-	// the RESP3 search response format as unstable.
-	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr, Protocol: 2})
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
-		log.Fatalf("redis: %v", err)
-	}
-
-	openaiClient := provider.NewOpenAIClient(apiKey)
-	keyStore := auth.NewKeyStore(redisClient)
-	rateLimitStore := ratelimit.NewRedisStore(redisClient)
-	limiter := ratelimit.New(rateLimitStore, ratelimit.DefaultConfig())
-	embedder := cache.NewEmbeddingClient(apiKey)
-	cacheTTL, err := cache.ParseTTL(os.Getenv("CACHE_TTL"))
+	cfg, err := application.LoadConfig(os.Getenv)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	semanticCache, err := cache.NewSemanticCache(redisClient, embedder, cacheTTL)
+	startupCtx, cancelStartup := context.WithTimeout(context.Background(), startupTimeout)
+	app, err := application.New(startupCtx, cfg)
+	cancelStartup()
 	if err != nil {
-		log.Fatalf("semantic cache: %v", err)
+		log.Fatal(err)
 	}
+	defer func() {
+		if err := app.Close(); err != nil {
+			log.Printf("close application: %v", err)
+		}
+	}()
 
-	usageTracker := usage.NewTracker(redisClient)
-
-	completions := completion.New(openaiClient, semanticCache, usageTracker)
-	h := handler.New(completions, usageTracker, limiter)
-
-	mux := handler.NewServer(h,
-		middleware.Auth(keyStore),
-		middleware.RateLimit(limiter),
-	)
-
-	server := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
-	}
-
+	server := app.Server
 	done := make(chan struct{})
 	go func() {
 		sigCh := make(chan os.Signal, 1)

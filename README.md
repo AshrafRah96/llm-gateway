@@ -207,6 +207,10 @@ docker run -p 8080:8080 \
 | `REDIS_ADDR`     | Where Redis is           | `localhost:6379` |
 | `CACHE_TTL`      | How long answers remain reusable | `24h` |
 
+`internal/application` validates these values before constructing the adapter graph.
+Redis connectivity and semantic-cache index creation share a bounded startup context,
+so a broken dependency cannot leave startup waiting forever.
+
 ## Trying it out
 
 ```bash
@@ -302,6 +306,7 @@ and model prices remain compile-time constants. Cache lifetime is configurable.
 
 | Package                  | What lives there                                   |
 |--------------------------|----------------------------------------------------|
+| `internal/application`   | Configuration, concrete composition and owned resources |
 | `internal/completion`    | What a chat request does, start to finish          |
 | `internal/handler`       | HTTP: reads the request, writes the response       |
 | `internal/middleware`    | Key checking and rate limiting                     |
