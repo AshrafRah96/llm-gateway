@@ -1,15 +1,20 @@
 package provider
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
+	"github.com/ashrafrah96/llm-gateway/internal/completion"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
 )
+
+const maxSSELine = 1 << 20
 
 type openAIMessage struct {
 	Role    string `json:"role"`
@@ -30,6 +35,26 @@ type openAIRequest struct {
 type OpenAIClient struct {
 	APIKey string
 	APIURL string
+}
+
+type streamUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
+type streamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+	} `json:"choices"`
+	Usage *streamUsage `json:"usage"`
+}
+
+type openAIStream struct {
+	body    io.ReadCloser
+	scanner *bufio.Scanner
+	err     error
 }
 
 func NewOpenAIClient(apiKey string) *OpenAIClient {
@@ -57,16 +82,71 @@ func (c *OpenAIClient) Complete(ctx context.Context, prompt string, m router.Mod
 	return respBody, status, nil
 }
 
-// Stream returns the raw SSE body. The caller must Close it.
-// include_usage is required or the terminal usage chunk never arrives and the
+// Stream translates OpenAI's SSE wire format into provider-neutral events.
+// include_usage is required or the terminal usage event never arrives and the
 // completion module cannot meter the stream.
-func (c *OpenAIClient) Stream(ctx context.Context, prompt string, m router.Model) (io.ReadCloser, int, error) {
-	return c.do(ctx, openAIRequest{
+func (c *OpenAIClient) Stream(ctx context.Context, prompt string, m router.Model) (completion.ProviderStream, int, error) {
+	body, status, err := c.do(ctx, openAIRequest{
 		Model:         m.ID,
 		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 		Messages:      []openAIMessage{{Role: "user", Content: prompt}},
 	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxSSELine)
+	return &openAIStream{body: body, scanner: scanner}, status, nil
+}
+
+func (s *openAIStream) Next() (completion.ProviderEvent, bool) {
+	if s.err != nil {
+		return completion.ProviderEvent{}, false
+	}
+
+	for s.scanner.Scan() {
+		line := s.scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			return completion.ProviderEvent{Done: true}, true
+		}
+
+		var chunk streamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			s.err = fmt.Errorf("decode stream event: %w", err)
+			return completion.ProviderEvent{}, false
+		}
+
+		var content strings.Builder
+		for _, choice := range chunk.Choices {
+			content.WriteString(choice.Delta.Content)
+		}
+		event := completion.ProviderEvent{Content: content.String()}
+		if chunk.Usage != nil {
+			event.Usage = &completion.ProviderUsage{
+				PromptTokens:     chunk.Usage.PromptTokens,
+				CompletionTokens: chunk.Usage.CompletionTokens,
+			}
+		}
+		return event, true
+	}
+
+	s.err = s.scanner.Err()
+	return completion.ProviderEvent{}, false
+}
+
+func (s *openAIStream) Err() error {
+	return s.err
+}
+
+func (s *openAIStream) Close() error {
+	return s.body.Close()
 }
 
 func (c *OpenAIClient) do(ctx context.Context, payload openAIRequest) (io.ReadCloser, int, error) {

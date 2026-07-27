@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
+	"github.com/ashrafrah96/llm-gateway/internal/completion"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
 )
 
@@ -87,6 +89,60 @@ func TestStream_RequestsUsage(t *testing.T) {
 	}
 	if opts["include_usage"] != true {
 		t.Errorf("include_usage = %v, want true", opts["include_usage"])
+	}
+}
+
+func TestStreamDecodesEvents(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantEvents []completion.ProviderEvent
+		wantErr    bool
+	}{
+		{
+			name: "content usage and done",
+			body: "data: {\"choices\":[{\"delta\":{\"content\":\"Paris\"}}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20}}\n\n" +
+				"data: [DONE]\n\n",
+			wantEvents: []completion.ProviderEvent{
+				{Content: "Paris"},
+				{Usage: &completion.ProviderUsage{PromptTokens: 10, CompletionTokens: 20}},
+				{Done: true},
+			},
+		},
+		{
+			name:       "ignores non data lines",
+			body:       ": keepalive\n\ndata: [DONE]\n\n",
+			wantEvents: []completion.ProviderEvent{{Done: true}},
+		},
+		{
+			name:    "malformed json reports read error",
+			body:    "data: {broken}\n\n",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, _ := upstream(t, http.StatusOK, tt.body)
+			stream, _, err := client.Stream(context.Background(), "hello", router.Cheap)
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			defer stream.Close()
+
+			var got []completion.ProviderEvent
+			for event, ok := stream.Next(); ok; event, ok = stream.Next() {
+				got = append(got, event)
+			}
+
+			if !reflect.DeepEqual(got, tt.wantEvents) {
+				t.Errorf("events = %#v, want %#v", got, tt.wantEvents)
+			}
+			if (stream.Err() != nil) != tt.wantErr {
+				t.Errorf("Err() = %v, wantErr %v", stream.Err(), tt.wantErr)
+			}
+		})
 	}
 }
 

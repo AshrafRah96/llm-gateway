@@ -1,13 +1,10 @@
 package completion
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
@@ -15,27 +12,78 @@ import (
 	"github.com/ashrafrah96/llm-gateway/internal/router"
 )
 
-const sseBody = `data: {"choices":[{"delta":{"content":"Par"}}]}
+var completeEvents = []ProviderEvent{
+	{Content: "Par"},
+	{Content: "is"},
+	{Usage: &ProviderUsage{PromptTokens: 10, CompletionTokens: 20}},
+	{Done: true},
+}
 
-data: {"choices":[{"delta":{"content":"is"}}]}
-
-data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20}}
-
-data: [DONE]
-
-`
-
-func drain(t *testing.T, s *Stream) []string {
+func drain(t *testing.T, s *Stream) []StreamChunk {
 	t.Helper()
-	var out []string
-	for data, ok := s.Next(); ok; data, ok = s.Next() {
-		out = append(out, data)
+	var out []StreamChunk
+	for chunk, ok := s.Next(); ok; chunk, ok = s.Next() {
+		out = append(out, chunk)
 	}
 	return out
 }
 
+func TestStreamSettlesWhenExhausted(t *testing.T) {
+	tests := []struct {
+		name          string
+		events        []ProviderEvent
+		cacheEntry    *cache.CacheEntry
+		wantRecords   int
+		wantStores    int
+		wantEstimated bool
+	}{
+		{
+			name:        "complete provider stream",
+			events:      completeEvents,
+			wantRecords: 1,
+			wantStores:  1,
+		},
+		{
+			name: "truncated provider stream",
+			events: []ProviderEvent{
+				{Content: "partial answer"},
+			},
+			wantRecords:   1,
+			wantEstimated: true,
+		},
+		{
+			name:       "cache replay",
+			cacheEntry: &cache.CacheEntry{Response: []byte(okBody), Status: http.StatusOK},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &fakeProvider{events: tt.events, status: http.StatusOK}
+			c, fc, fr := newFixture(p)
+			fc.entry = tt.cacheEntry
+
+			s, err := c.Stream(context.Background(), Request{APIKey: "key-1", Prompt: "hello"})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			drain(t, s)
+
+			if fr.calls != tt.wantRecords {
+				t.Errorf("usage records = %d, want %d", fr.calls, tt.wantRecords)
+			}
+			if fc.sets != tt.wantStores {
+				t.Errorf("cache stores = %d, want %d", fc.sets, tt.wantStores)
+			}
+			if fr.estimated != tt.wantEstimated {
+				t.Errorf("estimated = %v, want %v", fr.estimated, tt.wantEstimated)
+			}
+		})
+	}
+}
+
 func TestStream_PassesChunksThroughInOrder(t *testing.T) {
-	p := &fakeProvider{sse: sseBody, status: http.StatusOK}
+	p := &fakeProvider{events: completeEvents, status: http.StatusOK}
 	c, _, _ := newFixture(p)
 
 	s, err := c.Stream(context.Background(), Request{Prompt: "hi"})
@@ -46,13 +94,13 @@ func TestStream_PassesChunksThroughInOrder(t *testing.T) {
 
 	got := drain(t, s)
 	if len(got) != 3 {
-		t.Fatalf("got %d chunks: %q", len(got), got)
+		t.Fatalf("got %d chunks: %+v", len(got), got)
 	}
-	if got[0] != `{"choices":[{"delta":{"content":"Par"}}]}` {
-		t.Errorf("first chunk = %s", got[0])
+	if got[0].Content != "Par" {
+		t.Errorf("first chunk = %+v", got[0])
 	}
-	if got[len(got)-1] != "[DONE]" {
-		t.Errorf("last chunk = %q, want [DONE]", got[len(got)-1])
+	if !got[len(got)-1].Done {
+		t.Errorf("last chunk = %+v, want Done", got[len(got)-1])
 	}
 	if s.Model() != router.Cheap.ID {
 		t.Errorf("Model() = %q, want %q", s.Model(), router.Cheap.ID)
@@ -64,7 +112,7 @@ func TestStream_PassesChunksThroughInOrder(t *testing.T) {
 // choices array is empty, so forwarding it breaks any client that reads choices[0]
 // without checking the length.
 func TestStream_UsageChunkIsNotForwardedToTheClient(t *testing.T) {
-	p := &fakeProvider{sse: sseBody, status: http.StatusOK}
+	p := &fakeProvider{events: completeEvents, status: http.StatusOK}
 	c, _, fr := newFixture(p)
 
 	s, err := c.Stream(context.Background(), Request{APIKey: "k", Prompt: "hi"})
@@ -72,19 +120,13 @@ func TestStream_UsageChunkIsNotForwardedToTheClient(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, data := range drain(t, s) {
-		if data == "[DONE]" {
-			continue
-		}
-		var chunk sseChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			t.Fatalf("chunk is not JSON: %v (%s)", err, data)
-		}
-		if len(chunk.Choices) == 0 {
-			t.Errorf("forwarded a chunk with no choices: %s", data)
-		}
-		if chunk.Usage != nil {
-			t.Errorf("forwarded our billing chunk to the client: %s", data)
+	got := drain(t, s)
+	if len(got) != 3 {
+		t.Fatalf("forwarded %d chunks, want two content chunks and Done", len(got))
+	}
+	for _, chunk := range got[:2] {
+		if chunk.Content == "" || chunk.Done {
+			t.Errorf("forwarded non-content provider event: %+v", chunk)
 		}
 	}
 
@@ -96,8 +138,8 @@ func TestStream_UsageChunkIsNotForwardedToTheClient(t *testing.T) {
 }
 
 // This is the regression the review found: streams used to be unmetered entirely.
-func TestStream_CloseRecordsUsage(t *testing.T) {
-	p := &fakeProvider{sse: sseBody, status: http.StatusOK}
+func TestStream_ExhaustionRecordsUsageAndClosesProvider(t *testing.T) {
+	p := &fakeProvider{events: completeEvents, status: http.StatusOK}
 	c, _, fr := newFixture(p)
 
 	s, err := c.Stream(context.Background(), Request{APIKey: "key-1", Prompt: "hi"})
@@ -105,13 +147,6 @@ func TestStream_CloseRecordsUsage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	drain(t, s)
-
-	if fr.calls != 0 {
-		t.Error("usage should be recorded on Close, not mid-stream")
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
 
 	if fr.calls != 1 {
 		t.Fatalf("usage recorded %d times, want 1", fr.calls)
@@ -122,15 +157,21 @@ func TestStream_CloseRecordsUsage(t *testing.T) {
 	if want := router.Cheap.Cost(10, 20); fr.cost != want {
 		t.Errorf("cost = %v, want %v", fr.cost, want)
 	}
-	if !p.lastBody.closed {
-		t.Error("upstream body was not closed")
+	if !p.lastStream.closed {
+		t.Error("upstream stream was not closed")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close after automatic settlement: %v", err)
+	}
+	if fr.calls != 1 {
+		t.Fatalf("Close recorded usage again; calls = %d", fr.calls)
 	}
 }
 
 // A streamed answer must land in the cache in the same shape a /chat answer does,
 // so either entry point can serve the other's traffic.
 func TestStream_CloseCachesAssembledCompletion(t *testing.T) {
-	p := &fakeProvider{sse: sseBody, status: http.StatusOK}
+	p := &fakeProvider{events: completeEvents, status: http.StatusOK}
 	c, fc, _ := newFixture(p)
 
 	s, _ := c.Stream(context.Background(), Request{Prompt: "hi"})
@@ -162,7 +203,7 @@ func TestStream_CloseCachesAssembledCompletion(t *testing.T) {
 }
 
 func TestStream_CacheHitReplays(t *testing.T) {
-	p := &fakeProvider{sse: sseBody, status: http.StatusOK}
+	p := &fakeProvider{events: completeEvents, status: http.StatusOK}
 	c, fc, fr := newFixture(p)
 	fc.entry = &cache.CacheEntry{Response: []byte(okBody), Status: http.StatusOK}
 
@@ -179,22 +220,11 @@ func TestStream_CacheHitReplays(t *testing.T) {
 	}
 
 	got := drain(t, s)
-	if len(got) != 2 || got[1] != "[DONE]" {
-		t.Fatalf("replay = %q, want one content chunk then [DONE]", got)
+	if len(got) != 2 || !got[1].Done {
+		t.Fatalf("replay = %+v, want one content chunk then Done", got)
 	}
-
-	var chunk struct {
-		Choices []struct {
-			Delta struct {
-				Content string `json:"content"`
-			} `json:"delta"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal([]byte(got[0]), &chunk); err != nil {
-		t.Fatalf("replayed chunk is not SSE-shaped: %v (%s)", err, got[0])
-	}
-	if len(chunk.Choices) != 1 || chunk.Choices[0].Delta.Content != "Paris" {
-		t.Errorf("replayed delta = %+v, want \"Paris\"", chunk.Choices)
+	if got[0].Content != "Paris" {
+		t.Errorf("replayed content = %q, want Paris", got[0].Content)
 	}
 
 	if err := s.Close(); err != nil {
@@ -211,11 +241,13 @@ func TestStream_CacheHitReplays(t *testing.T) {
 // A stream cut short never sends [DONE]. Caching what arrived would serve a truncated
 // answer to every semantically similar prompt from then on.
 func TestStream_TruncatedStreamIsNotCached(t *testing.T) {
-	truncated := `data: {"choices":[{"delta":{"content":"Par"}}]}
-
-data: {"choices":[{"delta":{"content":"is is the cap`
-
-	p := &fakeProvider{sse: truncated, status: http.StatusOK}
+	p := &fakeProvider{
+		events: []ProviderEvent{
+			{Content: "Par"},
+			{Content: "is is the cap"},
+		},
+		status: http.StatusOK,
+	}
 	c, fc, fr := newFixture(p)
 
 	s, err := c.Stream(context.Background(), Request{APIKey: "k", Prompt: "hi"})
@@ -234,27 +266,21 @@ data: {"choices":[{"delta":{"content":"is is the cap`
 	}
 }
 
-type errReader struct{ err error }
-
-func (r errReader) Read([]byte) (int, error) { return 0, r.err }
-
 // A read failure mid-stream must not look identical to a clean end of stream.
 func TestStream_ReadErrorIsReported(t *testing.T) {
 	boom := errors.New("connection reset by peer")
 
-	p := &fakeProvider{status: http.StatusOK}
+	p := &fakeProvider{
+		events:  []ProviderEvent{{Content: "Par"}},
+		readErr: boom,
+		status:  http.StatusOK,
+	}
 	c, fc, _ := newFixture(p)
 
 	s, err := c.Stream(context.Background(), Request{Prompt: "hi"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Replace the body with one that yields a chunk and then fails.
-	s.scanner = bufio.NewScanner(io.MultiReader(
-		strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"Par\"}}]}\n"),
-		errReader{err: boom},
-	))
-
 	if got := drain(t, s); len(got) != 1 {
 		t.Fatalf("got %d chunks, want 1 before the failure", len(got))
 	}
@@ -272,14 +298,15 @@ func TestStream_ReadErrorIsReported(t *testing.T) {
 // never arrives. Recording zero would hide a cost we really incurred — the prompt was
 // charged in full and tokens were generated before the cut.
 func TestStream_AbandonedStreamIsEstimatedNotZero(t *testing.T) {
-	// Content chunks, then nothing: no usage chunk, no [DONE].
-	abandoned := `data: {"choices":[{"delta":{"content":"Paris is the capital"}}]}
-
-data: {"choices":[{"delta":{"content":" of France and also"}}]}
-`
 	prompt := "What is the capital of France, and what is it known for?"
 
-	p := &fakeProvider{sse: abandoned, status: http.StatusOK}
+	p := &fakeProvider{
+		events: []ProviderEvent{
+			{Content: "Paris is the capital"},
+			{Content: " of France and also"},
+		},
+		status: http.StatusOK,
+	}
 	c, fc, fr := newFixture(p)
 
 	s, err := c.Stream(context.Background(), Request{APIKey: "k", Prompt: prompt})
@@ -312,7 +339,7 @@ data: {"choices":[{"delta":{"content":" of France and also"}}]}
 }
 
 func TestStream_CompletedStreamIsNotMarkedEstimated(t *testing.T) {
-	p := &fakeProvider{sse: sseBody, status: http.StatusOK}
+	p := &fakeProvider{events: completeEvents, status: http.StatusOK}
 	c, _, fr := newFixture(p)
 
 	s, _ := c.Stream(context.Background(), Request{APIKey: "k", Prompt: "hi"})
@@ -370,7 +397,7 @@ func TestStream_NonOKUpstreamCarriesTheStatus(t *testing.T) {
 		http.StatusServiceUnavailable,
 		http.StatusUnauthorized,
 	} {
-		p := &fakeProvider{sse: `{"error":"nope"}`, status: status}
+		p := &fakeProvider{status: status}
 		c, _, _ := newFixture(p)
 
 		_, err := c.Stream(context.Background(), Request{Prompt: "hi"})
@@ -385,8 +412,8 @@ func TestStream_NonOKUpstreamCarriesTheStatus(t *testing.T) {
 		if upstream.Status != status {
 			t.Errorf("UpstreamError.Status = %d, want %d", upstream.Status, status)
 		}
-		if !p.lastBody.closed {
-			t.Errorf("status %d: upstream body leaked on the error path", status)
+		if !p.lastStream.closed {
+			t.Errorf("status %d: upstream stream leaked on the error path", status)
 		}
 	}
 }
@@ -408,7 +435,7 @@ func TestStream_TransportErrorIsNotAnUpstreamError(t *testing.T) {
 }
 
 func TestStream_CloseIsIdempotent(t *testing.T) {
-	p := &fakeProvider{sse: sseBody, status: http.StatusOK}
+	p := &fakeProvider{events: completeEvents, status: http.StatusOK}
 	c, fc, fr := newFixture(p)
 
 	s, _ := c.Stream(context.Background(), Request{Prompt: "hi"})
