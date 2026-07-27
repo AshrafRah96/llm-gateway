@@ -155,3 +155,24 @@ func TestParseSearchResultRESP3RejectsMalformedData(t *testing.T) {
 		t.Fatal("parseSearchResult accepted malformed RESP3 data")
 	}
 }
+
+func TestParseSearchResultRESP3TreatsExpiredDocumentAsMiss(t *testing.T) {
+	c := &SemanticCache{}
+	results := map[interface{}]interface{}{
+		"total_results": int64(1),
+		"results": []interface{}{
+			map[interface{}]interface{}{
+				"id":               "cache:v2:expired",
+				"extra_attributes": map[interface{}]interface{}{},
+			},
+		},
+	}
+
+	entry, err := c.parseSearchResult(results)
+	if err != nil {
+		t.Fatalf("parseSearchResult: %v", err)
+	}
+	if entry != nil {
+		t.Fatalf("entry = %+v, want a miss", entry)
+	}
+}
