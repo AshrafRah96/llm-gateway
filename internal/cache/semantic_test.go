@@ -18,10 +18,62 @@ func (e fixedEmbedder) Embed(context.Context, string) ([]float32, error) {
 	return e.vector, e.err
 }
 
+type countingEmbedder struct {
+	vector []float32
+	calls  int
+}
+
+func (e *countingEmbedder) Embed(context.Context, string) ([]float32, error) {
+	e.calls++
+	return e.vector, nil
+}
+
 func testVector(axis int) []float32 {
 	vector := make([]float32, vectorDim)
 	vector[axis] = 1
 	return vector
+}
+
+func TestSemanticCacheAttemptEmbedsOnce(t *testing.T) {
+	tests := []struct {
+		name  string
+		store bool
+	}{
+		{name: "lookup only"},
+		{name: "lookup then store", store: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := redis.NewClient(&redis.Options{
+				Addr:       "127.0.0.1:0",
+				MaxRetries: -1,
+				Protocol:   2,
+			})
+			t.Cleanup(func() { client.Close() })
+
+			embedder := &countingEmbedder{vector: testVector(0)}
+			c := &SemanticCache{client: client, embedder: embedder, ttl: time.Hour}
+
+			attempt, err := c.Begin(
+				context.Background(),
+				NewNamespace("key", "model"),
+				"prompt",
+			)
+			if err != nil {
+				t.Fatalf("Begin: %v", err)
+			}
+
+			_, _ = attempt.Get(context.Background())
+			if tt.store {
+				_ = attempt.Set(context.Background(), []byte(`{"answer":"cached"}`), 200)
+			}
+
+			if embedder.calls != 1 {
+				t.Fatalf("Embed called %d times, want 1", embedder.calls)
+			}
+		})
+	}
 }
 
 func TestNewNamespaceFingerprintsTenantAndIncludesModelAndVersion(t *testing.T) {
@@ -86,13 +138,26 @@ func TestParseTTL(t *testing.T) {
 }
 
 func TestSemanticCacheRejectsUnexpectedEmbeddingDimensions(t *testing.T) {
-	c := &SemanticCache{embedder: fixedEmbedder{vector: []float32{1}}, ttl: time.Hour}
-
-	if _, err := c.Get(context.Background(), NewNamespace("key", "model"), "prompt"); err == nil {
-		t.Fatal("Get accepted an embedding with the wrong dimensions")
+	tests := []struct {
+		name   string
+		vector []float32
+	}{
+		{name: "empty"},
+		{name: "short", vector: []float32{1}},
+		{name: "long", vector: make([]float32, vectorDim+1)},
 	}
-	if err := c.Set(context.Background(), NewNamespace("key", "model"), "prompt", []byte("{}"), 200); err == nil {
-		t.Fatal("Set accepted an embedding with the wrong dimensions")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &SemanticCache{embedder: fixedEmbedder{vector: tt.vector}, ttl: time.Hour}
+			if _, err := c.Begin(
+				context.Background(),
+				NewNamespace("key", "model"),
+				"prompt",
+			); err == nil {
+				t.Fatal("Begin accepted an embedding with the wrong dimensions")
+			}
+		})
 	}
 }
 
@@ -109,7 +174,11 @@ func TestSemanticCacheSearchFailureIsReturned(t *testing.T) {
 		embedder: fixedEmbedder{vector: testVector(0)},
 		ttl:      time.Hour,
 	}
-	if _, err := c.Get(context.Background(), NewNamespace("key", "model"), "prompt"); err == nil {
+	attempt, err := c.Begin(context.Background(), NewNamespace("key", "model"), "prompt")
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if _, err := attempt.Get(context.Background()); err == nil {
 		t.Fatal("Get hid the Redis search failure")
 	}
 }

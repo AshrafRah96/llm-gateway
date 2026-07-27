@@ -34,7 +34,7 @@ so an answer produced for one model cannot silently stand in for another.
 | Module | Interface seen by callers | Complexity hidden behind it |
 |---|---|---|
 | `completion` | Complete or stream one request | Routing, caching, provider calls, metering and logging |
-| `cache` | Get or set within a namespace | Embeddings, Redis Search, similarity policy, TTL and schema versioning |
+| `cache` | Begin one attempt within a namespace | One reusable embedding, Redis Search, similarity policy, TTL and schema versioning |
 | `ratelimit` | Allow and status | Sliding-window state and atomic Redis Lua execution |
 | `provider` | Complete or stream | OpenAI HTTP request and response shapes |
 | `handler` | HTTP routes | JSON/SSE translation and response headers |
@@ -58,6 +58,10 @@ Every cache operation carries:
 Redis Search applies these as hard filters before ranking vectors. Semantic similarity
 can select only within that namespace. Redis keys contain hashes rather than raw keys or
 prompts, and entries expire after `CACHE_TTL` (`24h` by default).
+
+A request begins one cache attempt. The attempt embeds and validates the prompt once,
+then retains the encoded vector for both lookup and a later store. A cacheable miss
+therefore does not pay for a second embedding call.
 
 Schema v2 uses the `cache:v2:` prefix and `prompt_cache_v2` index. Old unscoped entries
 remain unreadable and can be removed separately; there is no unsafe migration path.

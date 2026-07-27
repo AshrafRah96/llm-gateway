@@ -55,24 +55,40 @@ func (p *fakeProvider) Stream(ctx context.Context, prompt string, m router.Model
 }
 
 type fakeCache struct {
-	entry   *cache.CacheEntry
-	getErr  error
-	setErr  error
-	getNS   cache.Namespace
-	setNS   cache.Namespace
-	sets    int
-	setBody []byte
-	setStat int
+	entry    *cache.CacheEntry
+	beginErr error
+	getErr   error
+	setErr   error
+	getNS    cache.Namespace
+	setNS    cache.Namespace
+	begins   int
+	sets     int
+	setBody  []byte
+	setStat  int
 }
 
-func (c *fakeCache) Get(ctx context.Context, ns cache.Namespace, prompt string) (*cache.CacheEntry, error) {
+func (c *fakeCache) Begin(ctx context.Context, ns cache.Namespace, prompt string) (cache.Attempt, error) {
+	c.begins++
 	c.getNS = ns
+	if c.beginErr != nil {
+		return nil, c.beginErr
+	}
+	return fakeCacheAttempt{cache: c}, nil
+}
+
+type fakeCacheAttempt struct {
+	cache *fakeCache
+}
+
+func (a fakeCacheAttempt) Get(ctx context.Context) (*cache.CacheEntry, error) {
+	c := a.cache
 	return c.entry, c.getErr
 }
 
-func (c *fakeCache) Set(ctx context.Context, ns cache.Namespace, prompt string, response []byte, status int) error {
+func (a fakeCacheAttempt) Set(ctx context.Context, response []byte, status int) error {
+	c := a.cache
 	c.sets++
-	c.setNS = ns
+	c.setNS = c.getNS
 	c.setBody, c.setStat = response, status
 	return c.setErr
 }
@@ -150,6 +166,9 @@ func TestComplete_CacheMissCallsRecordsAndStores(t *testing.T) {
 
 	if fc.sets != 1 || string(fc.setBody) != okBody || fc.setStat != http.StatusOK {
 		t.Errorf("cache stored %d times: %d %s", fc.sets, fc.setStat, fc.setBody)
+	}
+	if fc.begins != 1 {
+		t.Errorf("cache began %d attempts, want one lookup/store attempt", fc.begins)
 	}
 	if fc.getNS != fc.setNS {
 		t.Errorf("cache read namespace %+v differs from write namespace %+v", fc.getNS, fc.setNS)

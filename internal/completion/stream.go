@@ -62,12 +62,12 @@ type message struct {
 // Stream yields SSE payloads while accumulating everything Close needs in order to
 // meter, log and cache the exchange. One pass over the body serves all three.
 type Stream struct {
-	c     *Completion
-	ctx   context.Context
-	req   Request
-	model router.Model
-	ns    cache.Namespace
-	start time.Time
+	c       *Completion
+	ctx     context.Context
+	req     Request
+	model   router.Model
+	attempt cache.Attempt
+	start   time.Time
 
 	body    interface{ Close() error }
 	scanner *bufio.Scanner
@@ -89,9 +89,10 @@ type Stream struct {
 func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 	s := &Stream{c: c, ctx: ctx, req: req, start: time.Now()}
 	s.model = router.Route(req.Prompt)
-	s.ns = cache.NewNamespace(req.APIKey, s.model.ID)
+	ns := cache.NewNamespace(req.APIKey, s.model.ID)
+	s.attempt = c.beginCacheAttempt(ctx, ns, req.Prompt)
 
-	if entry := c.lookup(ctx, s.ns, req.Prompt); entry != nil {
+	if entry := c.lookup(ctx, s.attempt); entry != nil {
 		if chunks, ok := replayChunks(entry); ok {
 			s.cacheHit, s.replay = true, chunks
 			return s, nil
@@ -249,7 +250,7 @@ func (s *Stream) Close() error {
 		return s.err
 	}
 	if body, ok := assemble(s.content.String(), s.tokensIn, s.tokensOut); ok {
-		s.c.store(ctx, s.ns, s.req.Prompt, body, http.StatusOK)
+		s.c.store(ctx, s.attempt, body, http.StatusOK)
 	}
 	return nil
 }
