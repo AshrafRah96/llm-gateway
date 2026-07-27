@@ -1,0 +1,285 @@
+{
+  "version": "v1",
+  "cases": [
+    {
+      "id": "eq-cheap-01",
+      "kind": "equivalent",
+      "source": "What is the capital of France?",
+      "query": "Which city is France's capital?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-cheap-02",
+      "kind": "equivalent",
+      "source": "How many days are in a leap year?",
+      "query": "What is the number of days in a leap year?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-cheap-03",
+      "kind": "equivalent",
+      "source": "Who wrote Pride and Prejudice?",
+      "query": "Who is the author of Pride and Prejudice?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-cheap-04",
+      "kind": "equivalent",
+      "source": "What temperature does water freeze at in Celsius?",
+      "query": "At how many degrees Celsius does water become ice?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-cheap-05",
+      "kind": "equivalent",
+      "source": "Name the largest planet in our solar system.",
+      "query": "Which planet in the solar system is the biggest?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-cheap-06",
+      "kind": "equivalent",
+      "source": "What currency is used in Japan?",
+      "query": "Which money do people use in Japan?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-cheap-07",
+      "kind": "equivalent",
+      "source": "How long is a marathon in kilometres?",
+      "query": "What is the kilometre distance of a marathon?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-cheap-08",
+      "kind": "equivalent",
+      "source": "What gas do plants absorb from the air?",
+      "query": "Which gas is taken in by plants?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-cheap-09",
+      "kind": "equivalent",
+      "source": "When did the Second World War end?",
+      "query": "In what year did World War Two finish?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-cheap-10",
+      "kind": "equivalent",
+      "source": "What is the chemical symbol for gold?",
+      "query": "Which symbol represents gold on the periodic table?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "eq-powerful-01",
+      "kind": "equivalent",
+      "source": "Analyze why database indexes can make reads faster.",
+      "query": "Analyze how an index improves database read speed.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "eq-powerful-02",
+      "kind": "equivalent",
+      "source": "Compare optimistic and pessimistic locking.",
+      "query": "Compare pessimistic locking with optimistic locking.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "eq-powerful-03",
+      "kind": "equivalent",
+      "source": "Explain in detail how a sliding window rate limiter works.",
+      "query": "Describe in detail the operation of sliding window rate limiting.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "eq-powerful-04",
+      "kind": "equivalent",
+      "source": "Analyze the tradeoffs of synchronous and asynchronous messaging.",
+      "query": "Analyze tradeoffs between asynchronous and synchronous messages.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "eq-powerful-05",
+      "kind": "equivalent",
+      "source": "Compare horizontal scaling with vertical scaling.",
+      "query": "Compare scaling up against scaling out.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "eq-powerful-06",
+      "kind": "equivalent",
+      "source": "Explain step by step how TLS establishes a secure connection.",
+      "query": "Explain step by step how a secure TLS connection is established.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "eq-powerful-07",
+      "kind": "equivalent",
+      "source": "Evaluate the benefits and costs of database replication.",
+      "query": "Evaluate the advantages and drawbacks of replicating a database.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "eq-powerful-08",
+      "kind": "equivalent",
+      "source": "Analyze how cancellation should propagate through a request.",
+      "query": "Analyze request cancellation propagation.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "eq-powerful-09",
+      "kind": "equivalent",
+      "source": "Compare at-least-once and at-most-once message delivery.",
+      "query": "Compare at-most-once delivery to at-least-once delivery.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "eq-powerful-10",
+      "kind": "equivalent",
+      "source": "Analyze why floating point is risky for storing money.",
+      "query": "Analyze the risks of representing money with floating point numbers.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-cheap-01",
+      "kind": "different",
+      "source": "What is the capital of France?",
+      "query": "What is the capital of Germany?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-cheap-02",
+      "kind": "different",
+      "source": "How many days are in a leap year?",
+      "query": "How many days are in a common year?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-cheap-03",
+      "kind": "different",
+      "source": "Who wrote Pride and Prejudice?",
+      "query": "Who wrote Sense and Sensibility?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-cheap-04",
+      "kind": "different",
+      "source": "What temperature does water freeze at in Celsius?",
+      "query": "What temperature does water boil at in Celsius?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-cheap-05",
+      "kind": "different",
+      "source": "Name the largest planet in our solar system.",
+      "query": "Name the smallest planet in our solar system.",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-cheap-06",
+      "kind": "different",
+      "source": "What currency is used in Japan?",
+      "query": "What currency is used in China?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-cheap-07",
+      "kind": "different",
+      "source": "How long is a marathon in kilometres?",
+      "query": "How long is a half marathon in kilometres?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-cheap-08",
+      "kind": "different",
+      "source": "What gas do plants absorb from the air?",
+      "query": "What gas do plants release into the air?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-cheap-09",
+      "kind": "different",
+      "source": "When did the Second World War end?",
+      "query": "When did the First World War end?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-cheap-10",
+      "kind": "different",
+      "source": "What is the chemical symbol for gold?",
+      "query": "What is the chemical symbol for silver?",
+      "expected_tier": "cheap"
+    },
+    {
+      "id": "diff-powerful-01",
+      "kind": "different",
+      "source": "Analyze why database indexes can make reads faster.",
+      "query": "Analyze why database indexes can make writes slower.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-powerful-02",
+      "kind": "different",
+      "source": "Compare optimistic and pessimistic locking.",
+      "query": "Compare row locking and table locking.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-powerful-03",
+      "kind": "different",
+      "source": "Explain in detail how a sliding window rate limiter works.",
+      "query": "Explain in detail how a fixed window rate limiter works.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-powerful-04",
+      "kind": "different",
+      "source": "Analyze the tradeoffs of synchronous and asynchronous messaging.",
+      "query": "Analyze the tradeoffs of polling and webhooks.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-powerful-05",
+      "kind": "different",
+      "source": "Compare horizontal scaling with vertical scaling.",
+      "query": "Compare replication with partitioning.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-powerful-06",
+      "kind": "different",
+      "source": "Explain step by step how TLS establishes a secure connection.",
+      "query": "Explain step by step how SSH key authentication works.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-powerful-07",
+      "kind": "different",
+      "source": "Evaluate the benefits and costs of database replication.",
+      "query": "Evaluate the benefits and costs of database sharding.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-powerful-08",
+      "kind": "different",
+      "source": "Analyze how cancellation should propagate through a request.",
+      "query": "Analyze how retries should propagate through a request.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-powerful-09",
+      "kind": "different",
+      "source": "Compare at-least-once and at-most-once message delivery.",
+      "query": "Compare ordered and unordered message delivery.",
+      "expected_tier": "powerful"
+    },
+    {
+      "id": "diff-powerful-10",
+      "kind": "different",
+      "source": "Analyze why floating point is risky for storing money.",
+      "query": "Analyze why floating point is useful for scientific calculations.",
+      "expected_tier": "powerful"
+    }
+  ]
+}

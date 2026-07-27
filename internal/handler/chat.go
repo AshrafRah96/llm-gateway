@@ -2,37 +2,27 @@ package handler
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
-	"time"
 
-	"github.com/ashrafrah96/llm-gateway/internal/cache"
+	"github.com/ashrafrah96/llm-gateway/internal/completion"
 	"github.com/ashrafrah96/llm-gateway/internal/middleware"
-	"github.com/ashrafrah96/llm-gateway/internal/observability"
-	"github.com/ashrafrah96/llm-gateway/internal/provider"
 	"github.com/ashrafrah96/llm-gateway/internal/ratelimit"
-	"github.com/ashrafrah96/llm-gateway/internal/router"
-	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
 type ChatRequest struct {
 	Prompt string `json:"prompt"`
 }
 
+// Handler is the HTTP adapter. Everything a chat request actually does lives in the
+// completion module; these handlers only decode, encode and set headers.
 type Handler struct {
-	client  *provider.OpenAIClient
-	cache   *cache.SemanticCache
-	usage   *usage.Tracker
-	limiter *ratelimit.Limiter
+	completion *completion.Completion
+	usage      StatsReader
+	limiter    *ratelimit.Limiter
 }
 
-func New(client *provider.OpenAIClient, semanticCache *cache.SemanticCache, tracker *usage.Tracker, limiter *ratelimit.Limiter) *Handler {
-	return &Handler{
-		client:  client,
-		cache:   semanticCache,
-		usage:   tracker,
-		limiter: limiter,
-	}
+func New(c *completion.Completion, tracker StatsReader, limiter *ratelimit.Limiter) *Handler {
+	return &Handler{completion: c, usage: tracker, limiter: limiter}
 }
 
 func NewServer(h *Handler, mws ...middleware.Middleware) http.Handler {
@@ -54,77 +44,44 @@ func health(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-
-	var req ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+// decode is shared by both entry points so they cannot disagree about what a valid
+// chat request looks like.
+func decode(w http.ResponseWriter, r *http.Request) (completion.Request, bool) {
+	var body ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
+		return completion.Request{}, false
 	}
-	if req.Prompt == "" {
+	if body.Prompt == "" {
 		http.Error(w, "prompt is required", http.StatusBadRequest)
+		return completion.Request{}, false
+	}
+
+	return completion.Request{
+		APIKey: r.Header.Get("X-API-Key"),
+		Prompt: body.Prompt,
+	}, true
+}
+
+func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
+	req, ok := decode(w, r)
+	if !ok {
 		return
 	}
 
-	if h.cache != nil {
-		entry, err := h.cache.Get(r.Context(), req.Prompt)
-		if err != nil {
-			log.Printf("cache error: %v", err)
-		} else if entry != nil {
-			observability.Log(observability.RequestLog{
-				Timestamp: start,
-				LatencyMs: time.Since(start).Milliseconds(),
-				CacheHit:  true,
-				PromptLen: len(req.Prompt),
-				Status:    entry.Status,
-			})
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("X-Cache", "HIT")
-			w.WriteHeader(entry.Status)
-			w.Write(entry.Response)
-			return
-		}
-	}
-
-	model := router.Route(req.Prompt)
-
-	body, status, err := h.client.Call(req.Prompt, string(model))
+	resp, err := h.completion.Complete(r.Context(), req)
 	if err != nil {
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}
 
-	tokensIn, tokensOut := observability.ParseTokens(body)
-	cost := observability.CalculateCost(string(model), tokensIn, tokensOut)
-
-	if h.usage != nil {
-		apiKey := r.Header.Get("X-API-Key")
-		if err := h.usage.Record(r.Context(), apiKey, tokensIn, tokensOut, cost); err != nil {
-			log.Printf("usage record error: %v", err)
-		}
-	}
-
-	observability.Log(observability.RequestLog{
-		Timestamp: start,
-		LatencyMs: time.Since(start).Milliseconds(),
-		Model:     string(model),
-		CacheHit:  false,
-		PromptLen: len(req.Prompt),
-		TokensIn:  tokensIn,
-		TokensOut: tokensOut,
-		Status:    status,
-	})
-
-	if h.cache != nil && status == http.StatusOK {
-		if err := h.cache.Set(r.Context(), req.Prompt, body, status); err != nil {
-			log.Printf("cache store error: %v", err)
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Cache", "MISS")
-	w.Header().Set("X-Model", string(model))
-	w.WriteHeader(status)
-	w.Write(body)
+	if resp.CacheHit {
+		w.Header().Set("X-Cache", "HIT")
+	} else {
+		w.Header().Set("X-Cache", "MISS")
+		w.Header().Set("X-Model", resp.Model)
+	}
+	w.WriteHeader(resp.Status)
+	w.Write(resp.Body)
 }
