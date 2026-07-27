@@ -10,7 +10,6 @@ import (
 	"math"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -218,11 +217,10 @@ func hashValue(value string) string {
 func escapeTagValue(value string) string {
 	var escaped strings.Builder
 	for _, r := range value {
-		if unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_' {
-			escaped.WriteRune(r)
-			continue
+		switch r {
+		case '$', '{', '}', '\\', '|':
+			escaped.WriteByte('\\')
 		}
-		escaped.WriteByte('\\')
 		escaped.WriteRune(r)
 	}
 	return escaped.String()
