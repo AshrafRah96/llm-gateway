@@ -33,8 +33,19 @@ type SemanticCache struct {
 	ttl      time.Duration
 }
 
+type Attempt interface {
+	Get(ctx context.Context) (*CacheEntry, error)
+	Set(ctx context.Context, response []byte, status int) error
+}
+
+type semanticAttempt struct {
+	cache       *SemanticCache
+	namespace   Namespace
+	prompt      string
+	vectorBytes []byte
+}
+
 type CacheEntry struct {
-	Prompt   string `json:"prompt"`
 	Response []byte `json:"response"`
 	Status   int    `json:"status"`
 }
@@ -53,7 +64,7 @@ func ParseTTL(value string) (time.Duration, error) {
 	return ttl, nil
 }
 
-func NewSemanticCache(client *redis.Client, embedder Embedder, ttl time.Duration) (*SemanticCache, error) {
+func NewSemanticCache(ctx context.Context, client *redis.Client, embedder Embedder, ttl time.Duration) (*SemanticCache, error) {
 	if ttl <= 0 {
 		return nil, fmt.Errorf("cache TTL must be greater than zero")
 	}
@@ -62,15 +73,13 @@ func NewSemanticCache(client *redis.Client, embedder Embedder, ttl time.Duration
 		embedder: embedder,
 		ttl:      ttl,
 	}
-	if err := cache.createIndex(); err != nil {
+	if err := cache.createIndex(ctx); err != nil {
 		return nil, err
 	}
 	return cache, nil
 }
 
-func (c *SemanticCache) createIndex() error {
-	ctx := context.Background()
-
+func (c *SemanticCache) createIndex(ctx context.Context) error {
 	_, err := c.client.Do(ctx, "FT.INFO", indexName).Result()
 	if err == nil {
 		return nil
@@ -97,7 +106,7 @@ func (c *SemanticCache) createIndex() error {
 	return nil
 }
 
-func (c *SemanticCache) Get(ctx context.Context, ns Namespace, prompt string) (*CacheEntry, error) {
+func (c *SemanticCache) Begin(ctx context.Context, ns Namespace, prompt string) (Attempt, error) {
 	embedding, err := c.embedder.Embed(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("embed: %w", err)
@@ -106,17 +115,25 @@ func (c *SemanticCache) Get(ctx context.Context, ns Namespace, prompt string) (*
 		return nil, fmt.Errorf("embedding dimension = %d, want %d", len(embedding), vectorDim)
 	}
 
-	vectorBytes := float32ToBytes(embedding)
-	results, err := c.client.FTSearchWithArgs(
+	return &semanticAttempt{
+		cache:       c,
+		namespace:   ns,
+		prompt:      prompt,
+		vectorBytes: float32ToBytes(embedding),
+	}, nil
+}
+
+func (a *semanticAttempt) Get(ctx context.Context) (*CacheEntry, error) {
+	results, err := a.cache.client.FTSearchWithArgs(
 		ctx,
 		indexName,
 		"(@tenant:{$tenant} @model:{$model} @version:{$version})=>[KNN 1 @embedding $vec AS score]",
 		&redis.FTSearchOptions{
 			Params: map[string]interface{}{
-				"tenant":  ns.Tenant,
-				"model":   escapeTagValue(ns.Model),
-				"version": ns.Version,
-				"vec":     vectorBytes,
+				"tenant":  a.namespace.Tenant,
+				"model":   escapeTagValue(a.namespace.Model),
+				"version": a.namespace.Version,
+				"vec":     a.vectorBytes,
 			},
 			SortBy: []redis.FTSearchSortBy{
 				{FieldName: "score", Asc: true},
@@ -133,20 +150,11 @@ func (c *SemanticCache) Get(ctx context.Context, ns Namespace, prompt string) (*
 		return nil, fmt.Errorf("search: %w", err)
 	}
 
-	return c.parseSearchResult(results)
+	return a.cache.parseSearchResult(results)
 }
 
-func (c *SemanticCache) Set(ctx context.Context, ns Namespace, prompt string, response []byte, status int) error {
-	embedding, err := c.embedder.Embed(ctx, prompt)
-	if err != nil {
-		return fmt.Errorf("embed: %w", err)
-	}
-	if len(embedding) != vectorDim {
-		return fmt.Errorf("embedding dimension = %d, want %d", len(embedding), vectorDim)
-	}
-
+func (a *semanticAttempt) Set(ctx context.Context, response []byte, status int) error {
 	entry := CacheEntry{
-		Prompt:   prompt,
 		Response: response,
 		Status:   status,
 	}
@@ -155,19 +163,18 @@ func (c *SemanticCache) Set(ctx context.Context, ns Namespace, prompt string, re
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	key := cacheKey(ns, prompt)
-	vectorBytes := float32ToBytes(embedding)
+	key := cacheKey(a.namespace, a.prompt)
 
-	_, err = c.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+	_, err = a.cache.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 		pipe.HSet(ctx, key,
-			"tenant", ns.Tenant,
-			"model", ns.Model,
-			"version", ns.Version,
+			"tenant", a.namespace.Tenant,
+			"model", a.namespace.Model,
+			"version", a.namespace.Version,
 			"created_at", time.Now().Unix(),
-			"embedding", vectorBytes,
+			"embedding", a.vectorBytes,
 			"data", data,
 		)
-		pipe.PExpire(ctx, key, c.ttl)
+		pipe.PExpire(ctx, key, a.cache.ttl)
 		return nil
 	})
 	if err != nil {

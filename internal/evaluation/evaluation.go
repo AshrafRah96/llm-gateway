@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
@@ -59,8 +58,7 @@ func DecodeCorpus(r io.Reader) (Corpus, error) {
 }
 
 type Cache interface {
-	Get(ctx context.Context, ns cache.Namespace, prompt string) (*cache.CacheEntry, error)
-	Set(ctx context.Context, ns cache.Namespace, prompt string, response []byte, status int) error
+	Begin(ctx context.Context, ns cache.Namespace, prompt string) (cache.Attempt, error)
 }
 
 type CaseResult struct {
@@ -137,12 +135,20 @@ func Run(ctx context.Context, store Cache, cases []Case) (Report, error) {
 	for _, c := range cases {
 		model := router.Route(c.Source)
 		ns := cache.NewNamespace("semantic-evaluation:"+c.ID, model.ID)
-		if err := store.Set(ctx, ns, c.Source, []byte(`{"evaluation":"cached"}`), 200); err != nil {
+		seed, err := store.Begin(ctx, ns, c.Source)
+		if err != nil {
+			return Report{}, fmt.Errorf("case %q begin cache seed: %w", c.ID, err)
+		}
+		if err := seed.Set(ctx, []byte(`{"evaluation":"cached"}`), 200); err != nil {
 			return Report{}, fmt.Errorf("case %q seed cache: %w", c.ID, err)
 		}
 
 		start := time.Now()
-		entry, err := store.Get(ctx, ns, c.Query)
+		lookup, err := store.Begin(ctx, ns, c.Query)
+		if err != nil {
+			return Report{}, fmt.Errorf("case %q begin lookup: %w", c.ID, err)
+		}
+		entry, err := lookup.Get(ctx)
 		latency := float64(time.Since(start).Microseconds()) / 1000
 		if err != nil {
 			return Report{}, fmt.Errorf("case %q lookup: %w", c.ID, err)
@@ -229,8 +235,4 @@ func percentile(sorted []float64, p float64) float64 {
 	}
 	index := int(float64(len(sorted)-1)*p + 0.5)
 	return sorted[index]
-}
-
-func ParseTier(value string) Tier {
-	return Tier(strings.ToLower(value))
 }
