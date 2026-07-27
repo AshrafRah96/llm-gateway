@@ -26,8 +26,7 @@ type Provider interface {
 
 // Cache is the semantic prompt cache. Satisfied by *cache.SemanticCache.
 type Cache interface {
-	Get(ctx context.Context, ns cache.Namespace, prompt string) (*cache.CacheEntry, error)
-	Set(ctx context.Context, ns cache.Namespace, prompt string, response []byte, status int) error
+	Begin(ctx context.Context, ns cache.Namespace, prompt string) (cache.Attempt, error)
 }
 
 // Recorder meters a request against an API key. Satisfied by *usage.Tracker.
@@ -76,8 +75,9 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 	start := time.Now()
 	model := router.Route(req.Prompt)
 	ns := cache.NewNamespace(req.APIKey, model.ID)
+	attempt := c.beginCacheAttempt(ctx, ns, req.Prompt)
 
-	if entry := c.lookup(ctx, ns, req.Prompt); entry != nil {
+	if entry := c.lookup(ctx, attempt); entry != nil {
 		observability.Log(observability.RequestLog{
 			Timestamp: start,
 			LatencyMs: time.Since(start).Milliseconds(),
@@ -113,7 +113,7 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 	})
 
 	if status == http.StatusOK {
-		c.store(ctx, ns, req.Prompt, body, status)
+		c.store(ctx, attempt, body, status)
 	}
 
 	return Response{Body: body, Status: status, Model: model.ID}, nil
@@ -121,8 +121,20 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 
 // lookup returns nil on a miss. A cache failure degrades to a miss rather than
 // failing the request — the upstream call is the source of truth.
-func (c *Completion) lookup(ctx context.Context, ns cache.Namespace, prompt string) *cache.CacheEntry {
-	entry, err := c.cache.Get(ctx, ns, prompt)
+func (c *Completion) beginCacheAttempt(ctx context.Context, ns cache.Namespace, prompt string) cache.Attempt {
+	attempt, err := c.cache.Begin(ctx, ns, prompt)
+	if err != nil {
+		log.Printf("cache error: %v", err)
+		return nil
+	}
+	return attempt
+}
+
+func (c *Completion) lookup(ctx context.Context, attempt cache.Attempt) *cache.CacheEntry {
+	if attempt == nil {
+		return nil
+	}
+	entry, err := attempt.Get(ctx)
 	if err != nil {
 		log.Printf("cache error: %v", err)
 		return nil
@@ -130,8 +142,11 @@ func (c *Completion) lookup(ctx context.Context, ns cache.Namespace, prompt stri
 	return entry
 }
 
-func (c *Completion) store(ctx context.Context, ns cache.Namespace, prompt string, body []byte, status int) {
-	if err := c.cache.Set(ctx, ns, prompt, body, status); err != nil {
+func (c *Completion) store(ctx context.Context, attempt cache.Attempt, body []byte, status int) {
+	if attempt == nil {
+		return
+	}
+	if err := attempt.Set(ctx, body, status); err != nil {
 		log.Printf("cache store error: %v", err)
 	}
 }

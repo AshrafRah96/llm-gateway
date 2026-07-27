@@ -14,14 +14,23 @@ type fakeCache struct {
 	hits map[string]bool
 }
 
-func (c *fakeCache) Get(_ context.Context, _ cache.Namespace, prompt string) (*cache.CacheEntry, error) {
-	if c.hits[prompt] {
+func (c *fakeCache) Begin(_ context.Context, _ cache.Namespace, prompt string) (cache.Attempt, error) {
+	return fakeAttempt{cache: c, prompt: prompt}, nil
+}
+
+type fakeAttempt struct {
+	cache  *fakeCache
+	prompt string
+}
+
+func (a fakeAttempt) Get(context.Context) (*cache.CacheEntry, error) {
+	if a.cache.hits[a.prompt] {
 		return &cache.CacheEntry{Response: []byte(`{"answer":"cached"}`), Status: 200}, nil
 	}
 	return nil, nil
 }
 
-func (c *fakeCache) Set(context.Context, cache.Namespace, string, []byte, int) error {
+func (a fakeAttempt) Set(context.Context, []byte, int) error {
 	return nil
 }
 

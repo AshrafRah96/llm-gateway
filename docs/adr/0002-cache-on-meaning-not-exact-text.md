@@ -22,9 +22,11 @@ See `internal/cache/semantic.go`.
 
 Rewordings hit the cache, which is the point.
 
-Every lookup now costs an embedding call, so a cache miss is more expensive than it used
-to be. Embeddings are cheap compared to completions, so a miss rate below roughly 95%
-still comes out ahead, but this stops being true if most traffic is unique prompts.
+Every cache attempt costs an embedding call, so a cache miss is more expensive than an
+exact-key lookup. The attempt retains that embedding for a later store, so a cacheable
+miss embeds once rather than repeating the external call. Embeddings are cheap compared
+to completions, but semantic caching still stops paying for itself if most traffic is
+unique.
 
 Redis has to be the redis-stack image. Plain Redis has no vector search, so the gateway
 will not start against it.

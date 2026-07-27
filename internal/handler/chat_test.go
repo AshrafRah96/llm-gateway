@@ -42,10 +42,17 @@ func (p *fakeProvider) Stream(ctx context.Context, prompt string, m router.Model
 
 type fakeCache struct{ entry *cache.CacheEntry }
 
-func (c *fakeCache) Get(ctx context.Context, ns cache.Namespace, prompt string) (*cache.CacheEntry, error) {
-	return c.entry, nil
+func (c *fakeCache) Begin(ctx context.Context, ns cache.Namespace, prompt string) (cache.Attempt, error) {
+	return fakeCacheAttempt{cache: c}, nil
 }
-func (c *fakeCache) Set(ctx context.Context, ns cache.Namespace, prompt string, response []byte, status int) error {
+
+type fakeCacheAttempt struct{ cache *fakeCache }
+
+func (a fakeCacheAttempt) Get(context.Context) (*cache.CacheEntry, error) {
+	return a.cache.entry, nil
+}
+
+func (a fakeCacheAttempt) Set(context.Context, []byte, int) error {
 	return nil
 }
 
