@@ -36,13 +36,14 @@ so an answer produced for one model cannot silently stand in for another.
 | `completion` | Complete or stream one request | Routing, caching, provider calls, metering and logging |
 | `cache` | Begin one attempt within a namespace | One reusable embedding, Redis Search, similarity policy, TTL and schema versioning |
 | `ratelimit` | Allow and status | Sliding-window state and atomic Redis Lua execution |
-| `provider` | Complete or stream | OpenAI HTTP request and response shapes |
-| `handler` | HTTP routes | JSON/SSE translation and response headers |
+| `provider` | Complete or stream semantic events | OpenAI HTTP, SSE scanning and response decoding |
+| `handler` | HTTP routes | Request JSON, stable response SSE and headers |
 
 `completion` is the central module. Both `/chat` and `/chat/stream` cross the same seam
 so their caching and billing behavior cannot drift apart. The streaming implementation
-is more complex because it must forward bytes while accumulating content and usage.
-That complexity stays behind the `Stream` interface.
+accumulates provider-neutral content and usage events while applying cache and billing
+policy. OpenAI framing stays inside the provider adapter; outbound SSE framing stays
+inside the HTTP handler.
 
 The cache and rate limiter each have real adapter seams. Production uses Redis and
 OpenAI; tests use deterministic adapters without external calls.

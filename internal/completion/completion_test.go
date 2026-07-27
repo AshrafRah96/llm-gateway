@@ -3,9 +3,7 @@ package completion
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
@@ -15,24 +13,19 @@ import (
 
 // ─────────────────────────── fakes ───────────────────────────
 
-type fakeBody struct {
-	io.Reader
-	closed bool
-}
-
-func (b *fakeBody) Close() error { b.closed = true; return nil }
-
 type fakeProvider struct {
-	body   []byte
-	sse    string
-	status int
-	err    error
+	body    []byte
+	sse     string
+	events  []ProviderEvent
+	readErr error
+	status  int
+	err     error
 
 	completeCalls int
 	streamCalls   int
 	gotPrompt     string
 	gotModel      router.Model
-	lastBody      *fakeBody
+	lastStream    *fakeProviderStream
 }
 
 func (p *fakeProvider) Complete(ctx context.Context, prompt string, m router.Model) ([]byte, int, error) {
@@ -44,14 +37,38 @@ func (p *fakeProvider) Complete(ctx context.Context, prompt string, m router.Mod
 	return p.body, p.status, nil
 }
 
-func (p *fakeProvider) Stream(ctx context.Context, prompt string, m router.Model) (io.ReadCloser, int, error) {
+func (p *fakeProvider) Stream(ctx context.Context, prompt string, m router.Model) (ProviderStream, int, error) {
 	p.streamCalls++
 	p.gotPrompt, p.gotModel = prompt, m
 	if p.err != nil {
 		return nil, 0, p.err
 	}
-	p.lastBody = &fakeBody{Reader: strings.NewReader(p.sse)}
-	return p.lastBody, p.status, nil
+	p.lastStream = &fakeProviderStream{events: append([]ProviderEvent(nil), p.events...), err: p.readErr}
+	return p.lastStream, p.status, nil
+}
+
+type fakeProviderStream struct {
+	events []ProviderEvent
+	err    error
+	closed bool
+}
+
+func (s *fakeProviderStream) Next() (ProviderEvent, bool) {
+	if len(s.events) == 0 {
+		return ProviderEvent{}, false
+	}
+	event := s.events[0]
+	s.events = s.events[1:]
+	return event, true
+}
+
+func (s *fakeProviderStream) Err() error {
+	return s.err
+}
+
+func (s *fakeProviderStream) Close() error {
+	s.closed = true
+	return nil
 }
 
 type fakeCache struct {

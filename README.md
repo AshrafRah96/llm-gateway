@@ -61,8 +61,10 @@ a caller that keeps retrying still recovers as soon as its earlier requests age 
 **Tracks spend per API key.** Every request records its tokens and its cost in USD.
 Streamed requests are counted too, including ones the caller abandons — see below.
 
-**Streams when you want it to.** `/chat/stream` forwards OpenAI's response as
-server-sent events. Streamed answers are cached and billed exactly like normal ones.
+**Streams when you want it to.** `/chat/stream` emits stable content-delta
+server-sent events. The OpenAI adapter decodes the upstream wire format first, so
+provider-specific framing does not leak into completion policy. Streamed answers are
+cached and billed exactly like normal ones.
 
 ## How a request flows
 
@@ -252,10 +254,10 @@ Follow [docs/EVALUATION.md](docs/EVALUATION.md) to run it.
 If you are reading this to judge the code rather than to use it, these are the parts
 worth your time.
 
-Start with [internal/completion/stream.go](internal/completion/stream.go). It is the
-hardest thing in the repo: it forwards bytes to the client while accumulating the answer
-and the token counts, and it has to tell a finished stream apart from one that was cut
-off.
+Start with [internal/provider/openai.go](internal/provider/openai.go), where OpenAI's
+SSE wire format becomes provider-neutral content, usage and completion events. Then read
+[internal/completion/stream.go](internal/completion/stream.go), which applies caching
+and billing policy without knowing OpenAI's JSON framing.
 
 Then [internal/ratelimit/redis.go](internal/ratelimit/redis.go), specifically the Lua
 script and the comment explaining why the timestamps are milliseconds. That comment is
