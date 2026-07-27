@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,7 +20,7 @@ import (
 
 type fakeProvider struct {
 	body   []byte
-	sse    string
+	events []completion.ProviderEvent
 	status int
 	err    error
 }
@@ -33,12 +32,28 @@ func (p *fakeProvider) Complete(ctx context.Context, prompt string, m router.Mod
 	return p.body, p.status, nil
 }
 
-func (p *fakeProvider) Stream(ctx context.Context, prompt string, m router.Model) (io.ReadCloser, int, error) {
+func (p *fakeProvider) Stream(ctx context.Context, prompt string, m router.Model) (completion.ProviderStream, int, error) {
 	if p.err != nil {
 		return nil, 0, p.err
 	}
-	return io.NopCloser(strings.NewReader(p.sse)), p.status, nil
+	return &fakeProviderStream{events: append([]completion.ProviderEvent(nil), p.events...)}, p.status, nil
 }
+
+type fakeProviderStream struct {
+	events []completion.ProviderEvent
+}
+
+func (s *fakeProviderStream) Next() (completion.ProviderEvent, bool) {
+	if len(s.events) == 0 {
+		return completion.ProviderEvent{}, false
+	}
+	event := s.events[0]
+	s.events = s.events[1:]
+	return event, true
+}
+
+func (s *fakeProviderStream) Err() error   { return nil }
+func (s *fakeProviderStream) Close() error { return nil }
 
 type fakeCache struct{ entry *cache.CacheEntry }
 
@@ -143,10 +158,12 @@ func TestChat_CacheHit(t *testing.T) {
 func TestChatStream_ProxiesSSE(t *testing.T) {
 	p := &fakeProvider{
 		status: http.StatusOK,
-		sse: "data: {\"choices\":[{\"delta\":{\"content\":\"Par\"}}]}\n\n" +
-			"data: {\"choices\":[{\"delta\":{\"content\":\"is\"}}]}\n\n" +
-			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20}}\n\n" +
-			"data: [DONE]\n\n",
+		events: []completion.ProviderEvent{
+			{Content: "Par"},
+			{Content: "is"},
+			{Usage: &completion.ProviderUsage{PromptTokens: 10, CompletionTokens: 20}},
+			{Done: true},
+		},
 	}
 
 	w := post(t, newTestServer(p, nil), "/chat/stream", `{"prompt": "hello"}`)
@@ -204,7 +221,7 @@ func TestChatEndpointsAgreeOnUpstreamStatus(t *testing.T) {
 			t.Errorf("/chat returned %d for upstream %d", chat.Code, status)
 		}
 
-		sse := &fakeProvider{sse: `{"error":"nope"}`, status: status}
+		sse := &fakeProvider{status: status}
 		stream := post(t, newTestServer(sse, nil), "/chat/stream", `{"prompt": "hello"}`)
 		if stream.Code != status {
 			t.Errorf("/chat/stream returned %d for upstream %d", stream.Code, status)

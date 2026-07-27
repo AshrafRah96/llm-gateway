@@ -57,9 +57,10 @@ Tests construct a real `Completion` over fake collaborators, so they exercise ev
 except the network. Handler tests no longer hijack a TCP connection to simulate an
 upstream failure.
 
-The streaming path is more complicated than it was, because `Stream` has to accumulate
-the answer and the token counts while forwarding bytes. That complexity is real and had
-to live somewhere. It is better inside a module with tests than absent.
+The streaming path still has real complexity, but its ownership is now explicit. The
+OpenAI adapter decodes SSE into provider-neutral content, usage and completion events.
+`Stream` accumulates those events and applies cache and billing policy, while the HTTP
+handler owns outbound SSE encoding. Each module is tested through its own interface.
 
 ## What we rejected
 

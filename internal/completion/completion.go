@@ -6,7 +6,6 @@ package completion
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"time"
@@ -21,7 +20,24 @@ import (
 // production and by a fake in tests.
 type Provider interface {
 	Complete(ctx context.Context, prompt string, m router.Model) ([]byte, int, error)
-	Stream(ctx context.Context, prompt string, m router.Model) (io.ReadCloser, int, error)
+	Stream(ctx context.Context, prompt string, m router.Model) (ProviderStream, int, error)
+}
+
+type ProviderUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+}
+
+type ProviderEvent struct {
+	Content string
+	Usage   *ProviderUsage
+	Done    bool
+}
+
+type ProviderStream interface {
+	Next() (ProviderEvent, bool)
+	Err() error
+	Close() error
 }
 
 // Cache is the semantic prompt cache. Satisfied by *cache.SemanticCache.

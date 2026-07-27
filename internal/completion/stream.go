@@ -1,7 +1,6 @@
 package completion
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"log"
@@ -15,32 +14,11 @@ import (
 	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
-const (
-	maxSSELine = 1 << 20
-
-	// Close runs after the client may already have gone away, so it detaches from the
-	// request context. This bounds the detached work instead of leaving it unbounded.
-	settleTimeout = 5 * time.Second
-)
+const settleTimeout = 5 * time.Second
 
 type usageTotals struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
-}
-
-// sseChunk is the streaming wire shape. Usage only arrives on the terminal chunk, and
-// only because provider.Stream asks for stream_options.include_usage.
-type sseChunk struct {
-	Choices []streamChoice `json:"choices"`
-	Usage   *usageTotals   `json:"usage"`
-}
-
-type streamChoice struct {
-	Delta delta `json:"delta"`
-}
-
-type delta struct {
-	Content string `json:"content"`
 }
 
 // completionBody is the non-streaming wire shape. Streams assemble into it so a streamed
@@ -59,8 +37,13 @@ type message struct {
 	Content string `json:"content"`
 }
 
-// Stream yields SSE payloads while accumulating everything Close needs in order to
-// meter, log and cache the exchange. One pass over the body serves all three.
+type StreamChunk struct {
+	Content string
+	Done    bool
+}
+
+// Stream yields provider-neutral content chunks while accumulating everything Close
+// needs in order to meter, log, and cache the exchange.
 type Stream struct {
 	c       *Completion
 	ctx     context.Context
@@ -69,19 +52,18 @@ type Stream struct {
 	attempt cache.Attempt
 	start   time.Time
 
-	body    interface{ Close() error }
-	scanner *bufio.Scanner
+	body ProviderStream
 
 	cacheHit bool
-	replay   []string
+	replay   []StreamChunk
 
 	content   strings.Builder
 	tokensIn  int
 	tokensOut int
 
-	complete bool  // saw [DONE]; a truncated stream must not be cached
-	metered  bool  // the provider reported usage; otherwise Close has to estimate
-	err      error // a read failure, kept distinct from a clean end of stream
+	complete bool
+	metered  bool
+	err      error
 	done     bool
 	closed   bool
 }
@@ -110,84 +92,51 @@ func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 	}
 
 	s.body = body
-	s.scanner = bufio.NewScanner(body)
-	s.scanner.Buffer(make([]byte, 0, 64*1024), maxSSELine)
 	return s, nil
 }
 
 func (s *Stream) Model() string  { return s.model.ID }
 func (s *Stream) CacheHit() bool { return s.cacheHit }
 
-// Next returns the next SSE payload to write, or ok=false once the stream is spent.
-// The value is the part after "data: ", including the final "[DONE]".
-func (s *Stream) Next() (string, bool) {
+func (s *Stream) Next() (StreamChunk, bool) {
 	if s.done {
-		return "", false
+		return StreamChunk{}, false
 	}
 
 	if s.cacheHit {
 		if len(s.replay) == 0 {
 			s.done = true
-			return "", false
+			return StreamChunk{}, false
 		}
-		data := s.replay[0]
+		chunk := s.replay[0]
 		s.replay = s.replay[1:]
-		return data, true
+		return chunk, true
 	}
 
-	for s.scanner.Scan() {
-		line := s.scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
+	for {
+		event, ok := s.body.Next()
+		if !ok {
+			s.err = s.body.Err()
+			s.done = true
+			return StreamChunk{}, false
 		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
+		if event.Usage != nil {
+			s.tokensIn = event.Usage.PromptTokens
+			s.tokensOut = event.Usage.CompletionTokens
+			s.metered = true
+		}
+		if event.Done {
 			s.done, s.complete = true, true
-			return data, true
+			return StreamChunk{Done: true}, true
 		}
-
-		// The terminal usage chunk exists because we asked for it, not because the
-		// client did, and it carries an empty choices array. Take its numbers and keep
-		// it out of the client's stream.
-		if s.absorb(data) {
-			continue
+		if event.Content != "" {
+			s.content.WriteString(event.Content)
+			return StreamChunk{Content: event.Content}, true
 		}
-		return data, true
 	}
-
-	// Scan stopped: either the body ended cleanly or the read failed. Only the former
-	// is a whole answer, and Close needs to tell them apart.
-	s.err = s.scanner.Err()
-	s.done = true
-	return "", false
 }
 
-// absorb keeps the running answer and the token totals current as chunks go past.
-// It reports whether the chunk was ours alone — a usage report with nothing in it for
-// the client — in which case the caller must not forward it.
-func (s *Stream) absorb(data string) (internalOnly bool) {
-	var chunk sseChunk
-	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-		return false
-	}
-	for _, c := range chunk.Choices {
-		s.content.WriteString(c.Delta.Content)
-	}
-	if chunk.Usage == nil {
-		return false
-	}
-
-	s.tokensIn = chunk.Usage.PromptTokens
-	s.tokensOut = chunk.Usage.CompletionTokens
-	s.metered = true
-
-	// Usage always arrives on a chunk with no choices. Should a provider ever attach it
-	// to one carrying content, forward it rather than swallow the content.
-	return len(chunk.Choices) == 0
-}
-
-// Close meters, logs and caches the exchange. Safe to call twice — handlers defer it.
+// Close meters, logs, and caches the exchange. It is safe to call twice.
 func (s *Stream) Close() error {
 	if s.closed {
 		return nil
@@ -211,11 +160,6 @@ func (s *Stream) Close() error {
 		return nil
 	}
 
-	// No usage chunk means the client abandoned the stream: cancelling the request
-	// killed the upstream read before the provider could report. Tokens were still
-	// consumed — the prompt is charged in full, and whatever was generated before the
-	// cut is charged too — so estimate rather than record a zero that quietly writes
-	// off a real cost.
 	if !s.metered {
 		s.tokensIn = estimateTokens(s.req.Prompt)
 		s.tokensOut = estimateTokens(s.content.String())
@@ -228,8 +172,8 @@ func (s *Stream) Close() error {
 	entry.Estimated = !s.metered
 	observability.Log(entry)
 
-	// A client that disconnects mid-stream still gets billed, so the metering and the
-	// cache write must outlive the request context.
+	// Settlement must outlive a request cancelled by a disconnected client, but it is
+	// bounded so abandoned streams cannot create unbounded background work.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), settleTimeout)
 	defer cancel()
 
@@ -241,8 +185,7 @@ func (s *Stream) Close() error {
 		Estimated: !s.metered,
 	})
 
-	// Only a stream that reached [DONE] is a whole answer. Caching a truncated one
-	// would serve it to every semantically similar prompt from then on.
+	// A provider stream is cacheable only after its explicit terminal event.
 	if !s.complete {
 		if s.err != nil {
 			log.Printf("stream read error: %v", s.err)
@@ -255,13 +198,6 @@ func (s *Stream) Close() error {
 	return nil
 }
 
-// estimateTokens approximates a token count for the fallback path where the provider
-// never reported one. Used only for abandoned streams, and every charge derived from it
-// is flagged usage.Entry.Estimated so it is never mistaken for a measurement.
-//
-// ponytail: ~4 bytes per token, the usual rule of thumb for English; it under-reads
-// CJK. Swap in a real BPE tokenizer if reconciliation against provider invoices shows
-// the drift matters.
 func estimateTokens(s string) int {
 	if s == "" {
 		return 0
@@ -269,8 +205,6 @@ func estimateTokens(s string) int {
 	return (len(s) + 3) / 4
 }
 
-// assemble turns the accumulated deltas into the body a non-streaming call would have
-// produced. An empty answer is not worth caching.
 func assemble(content string, tokensIn, tokensOut int) ([]byte, bool) {
 	if content == "" {
 		return nil, false
@@ -286,11 +220,7 @@ func assemble(content string, tokensIn, tokensOut int) ([]byte, bool) {
 	return body, true
 }
 
-// replayChunks turns a stored completion back into streaming shape.
-//
-// ponytail: cached streams replay as one chunk; split it if clients depend on
-// incremental delivery.
-func replayChunks(entry *cache.CacheEntry) ([]string, bool) {
+func replayChunks(entry *cache.CacheEntry) ([]StreamChunk, bool) {
 	var stored completionBody
 	if err := json.Unmarshal(entry.Response, &stored); err != nil {
 		return nil, false
@@ -299,11 +229,8 @@ func replayChunks(entry *cache.CacheEntry) ([]string, bool) {
 		return nil, false
 	}
 
-	data, err := json.Marshal(sseChunk{
-		Choices: []streamChoice{{Delta: delta{Content: stored.Choices[0].Message.Content}}},
-	})
-	if err != nil {
-		return nil, false
-	}
-	return []string{string(data), "[DONE]"}, true
+	return []StreamChunk{
+		{Content: stored.Choices[0].Message.Content},
+		{Done: true},
+	}, true
 }
