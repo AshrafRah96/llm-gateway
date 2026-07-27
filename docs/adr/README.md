@@ -12,6 +12,7 @@ guess why it looks like this.
 | [0004](0004-millisecond-scores-in-the-lua-script.md) | Millisecond scores in the Lua script | Redis Lua numbers are float64; nanosecond timestamps collapsed and let 12x through |
 | [0005](0005-one-module-for-a-chat-request.md) | One module for a chat request | Two handlers with their own copies drifted, and streaming stopped billing |
 | [0006](0006-estimate-and-bill-abandoned-streams.md) | Estimate and bill abandoned streams | Cancelling kills the usage chunk, so every abandoned stream was free |
+| [0007](0007-isolate-semantic-cache-by-tenant-and-model.md) | Isolate the semantic cache | Similarity is not authorization; tenant and model are hard filters |
 
 Numbers 3, 4 and 6 came out of finding bugs. Those are written up at greater length in
 [../ENGINEERING-NOTES.md](../ENGINEERING-NOTES.md).

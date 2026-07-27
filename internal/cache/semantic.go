@@ -8,19 +8,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
+	"time"
+	"unicode"
 
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	indexName           = "prompt_cache"
+	indexName           = "prompt_cache_v2"
+	keyPrefix           = "cache:v2:"
 	vectorDim           = 1536 // text-embedding-3-small
 	similarityThreshold = 0.95
+	DefaultTTL          = 24 * time.Hour
 )
+
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float32, error)
+}
 
 type SemanticCache struct {
 	client   *redis.Client
-	embedder *EmbeddingClient
+	embedder Embedder
+	ttl      time.Duration
 }
 
 type CacheEntry struct {
@@ -29,10 +39,28 @@ type CacheEntry struct {
 	Status   int    `json:"status"`
 }
 
-func NewSemanticCache(client *redis.Client, embedder *EmbeddingClient) (*SemanticCache, error) {
+func ParseTTL(value string) (time.Duration, error) {
+	if value == "" {
+		return DefaultTTL, nil
+	}
+	ttl, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse CACHE_TTL: %w", err)
+	}
+	if ttl <= 0 {
+		return 0, fmt.Errorf("CACHE_TTL must be greater than zero")
+	}
+	return ttl, nil
+}
+
+func NewSemanticCache(client *redis.Client, embedder Embedder, ttl time.Duration) (*SemanticCache, error) {
+	if ttl <= 0 {
+		return nil, fmt.Errorf("cache TTL must be greater than zero")
+	}
 	cache := &SemanticCache{
 		client:   client,
 		embedder: embedder,
+		ttl:      ttl,
 	}
 	if err := cache.createIndex(); err != nil {
 		return nil, err
@@ -51,13 +79,16 @@ func (c *SemanticCache) createIndex() error {
 	_, err = c.client.Do(ctx,
 		"FT.CREATE", indexName,
 		"ON", "HASH",
-		"PREFIX", "1", "cache:",
+		"PREFIX", "1", keyPrefix,
 		"SCHEMA",
+		"tenant", "TAG",
+		"model", "TAG",
+		"version", "TAG",
+		"created_at", "NUMERIC",
 		"embedding", "VECTOR", "FLAT", "6",
 		"TYPE", "FLOAT32",
 		"DIM", vectorDim,
 		"DISTANCE_METRIC", "COSINE",
-		"data", "TEXT",
 	).Result()
 	if err != nil {
 		return fmt.Errorf("create index: %w", err)
@@ -66,17 +97,24 @@ func (c *SemanticCache) createIndex() error {
 	return nil
 }
 
-func (c *SemanticCache) Get(ctx context.Context, prompt string) (*CacheEntry, error) {
+func (c *SemanticCache) Get(ctx context.Context, ns Namespace, prompt string) (*CacheEntry, error) {
 	embedding, err := c.embedder.Embed(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("embed: %w", err)
+	}
+	if len(embedding) != vectorDim {
+		return nil, fmt.Errorf("embedding dimension = %d, want %d", len(embedding), vectorDim)
 	}
 
 	vectorBytes := float32ToBytes(embedding)
 	results, err := c.client.Do(ctx,
 		"FT.SEARCH", indexName,
-		"*=>[KNN 1 @embedding $vec AS score]",
-		"PARAMS", "2", "vec", vectorBytes,
+		"(@tenant:{$tenant} @model:{$model} @version:{$version})=>[KNN 1 @embedding $vec AS score]",
+		"PARAMS", "8",
+		"tenant", ns.Tenant,
+		"model", escapeTagValue(ns.Model),
+		"version", ns.Version,
+		"vec", vectorBytes,
 		"SORTBY", "score",
 		"RETURN", "2", "data", "score",
 		"DIALECT", "2",
@@ -88,10 +126,13 @@ func (c *SemanticCache) Get(ctx context.Context, prompt string) (*CacheEntry, er
 	return c.parseSearchResult(results)
 }
 
-func (c *SemanticCache) Set(ctx context.Context, prompt string, response []byte, status int) error {
+func (c *SemanticCache) Set(ctx context.Context, ns Namespace, prompt string, response []byte, status int) error {
 	embedding, err := c.embedder.Embed(ctx, prompt)
 	if err != nil {
 		return fmt.Errorf("embed: %w", err)
+	}
+	if len(embedding) != vectorDim {
+		return fmt.Errorf("embedding dimension = %d, want %d", len(embedding), vectorDim)
 	}
 
 	entry := CacheEntry{
@@ -104,13 +145,21 @@ func (c *SemanticCache) Set(ctx context.Context, prompt string, response []byte,
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	key := "cache:" + hashPrompt(prompt)
+	key := cacheKey(ns, prompt)
 	vectorBytes := float32ToBytes(embedding)
 
-	_, err = c.client.HSet(ctx, key,
-		"embedding", vectorBytes,
-		"data", data,
-	).Result()
+	_, err = c.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.HSet(ctx, key,
+			"tenant", ns.Tenant,
+			"model", ns.Model,
+			"version", ns.Version,
+			"created_at", time.Now().Unix(),
+			"embedding", vectorBytes,
+			"data", data,
+		)
+		pipe.PExpire(ctx, key, c.ttl)
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
@@ -156,9 +205,27 @@ func (c *SemanticCache) parseSearchResult(results interface{}) (*CacheEntry, err
 	return &entry, nil
 }
 
-func hashPrompt(prompt string) string {
-	h := sha256.Sum256([]byte(prompt))
-	return hex.EncodeToString(h[:16])
+func cacheKey(ns Namespace, prompt string) string {
+	namespace := ns.Tenant + "\x00" + ns.Model + "\x00" + ns.Version
+	return keyPrefix + hashValue(namespace) + ":" + hashValue(prompt)
+}
+
+func hashValue(value string) string {
+	h := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(h[:])
+}
+
+func escapeTagValue(value string) string {
+	var escaped strings.Builder
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_' {
+			escaped.WriteRune(r)
+			continue
+		}
+		escaped.WriteByte('\\')
+		escaped.WriteRune(r)
+	}
+	return escaped.String()
 }
 
 func float32ToBytes(floats []float32) []byte {

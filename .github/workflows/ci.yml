@@ -13,7 +13,9 @@ jobs:
       # Several tests skip themselves when no Redis is reachable. Running one here
       # means they actually execute in CI rather than quietly passing as skips.
       redis:
-        image: redis:7-alpine
+        # The cache integration tests execute FT.SEARCH; plain Redis would make the
+        # project's headline feature skip silently.
+        image: redis/redis-stack-server:latest
         ports:
           - 6379:6379
         options: >-
@@ -55,7 +57,7 @@ jobs:
         # A skipped test proves nothing. If the Redis service failed to come up, the
         # suite would still be green, so fail loudly instead.
         run: |
-          if go test -v -count=1 ./internal/ratelimit/ ./internal/auth/ ./internal/usage/ | grep -q "^--- SKIP"; then
+          if go test -v -count=1 ./internal/cache/ ./internal/ratelimit/ ./internal/auth/ ./internal/usage/ | grep -q "^--- SKIP"; then
             echo "Redis-backed tests were skipped; the service is not reachable"
             exit 1
           fi

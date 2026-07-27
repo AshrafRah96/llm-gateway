@@ -10,6 +10,7 @@
 bin/
 build/
 dist/
+.cache/
 
 # Go workspace file
 go.work

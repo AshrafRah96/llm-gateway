@@ -58,17 +58,21 @@ type fakeCache struct {
 	entry   *cache.CacheEntry
 	getErr  error
 	setErr  error
+	getNS   cache.Namespace
+	setNS   cache.Namespace
 	sets    int
 	setBody []byte
 	setStat int
 }
 
-func (c *fakeCache) Get(ctx context.Context, prompt string) (*cache.CacheEntry, error) {
+func (c *fakeCache) Get(ctx context.Context, ns cache.Namespace, prompt string) (*cache.CacheEntry, error) {
+	c.getNS = ns
 	return c.entry, c.getErr
 }
 
-func (c *fakeCache) Set(ctx context.Context, prompt string, response []byte, status int) error {
+func (c *fakeCache) Set(ctx context.Context, ns cache.Namespace, prompt string, response []byte, status int) error {
 	c.sets++
+	c.setNS = ns
 	c.setBody, c.setStat = response, status
 	return c.setErr
 }
@@ -147,6 +151,15 @@ func TestComplete_CacheMissCallsRecordsAndStores(t *testing.T) {
 	if fc.sets != 1 || string(fc.setBody) != okBody || fc.setStat != http.StatusOK {
 		t.Errorf("cache stored %d times: %d %s", fc.sets, fc.setStat, fc.setBody)
 	}
+	if fc.getNS != fc.setNS {
+		t.Errorf("cache read namespace %+v differs from write namespace %+v", fc.getNS, fc.setNS)
+	}
+	if fc.getNS.Model != router.Cheap.ID || fc.getNS.Version == "" {
+		t.Errorf("cache namespace = %+v, want cheap model and a schema version", fc.getNS)
+	}
+	if fc.getNS.Tenant == "" || fc.getNS.Tenant == "key-1" {
+		t.Errorf("tenant = %q, want a non-empty fingerprint rather than the raw API key", fc.getNS.Tenant)
+	}
 
 	if fr.calls != 1 {
 		t.Fatalf("usage recorded %d times, want 1", fr.calls)
@@ -156,6 +169,22 @@ func TestComplete_CacheMissCallsRecordsAndStores(t *testing.T) {
 	}
 	if want := router.Cheap.Cost(10, 20); fr.cost != want {
 		t.Errorf("cost = %v, want %v", fr.cost, want)
+	}
+}
+
+func TestComplete_RoutesBeforeCacheLookup(t *testing.T) {
+	p := &fakeProvider{body: []byte(okBody), status: http.StatusOK}
+	c, fc, _ := newFixture(p)
+
+	_, err := c.Complete(context.Background(), Request{
+		APIKey: "tenant-key",
+		Prompt: "analyze this dataset",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fc.getNS.Model != router.Powerful.ID {
+		t.Errorf("cache lookup model = %q, want %q", fc.getNS.Model, router.Powerful.ID)
 	}
 }
 
