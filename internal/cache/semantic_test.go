@@ -59,9 +59,11 @@ func TestCacheKeyContainsNoRawAPIKey(t *testing.T) {
 }
 
 func TestEscapeTagValueProtectsRedisSearchSyntax(t *testing.T) {
-	got := escapeTagValue(`gpt-4.1 mini`)
-	if got != `gpt\-4\.1\ mini` {
-		t.Fatalf("escapeTagValue = %q", got)
+	if got := escapeTagValue(`gpt-4.1 mini`); got != `gpt-4.1 mini` {
+		t.Fatalf("ordinary model name = %q", got)
+	}
+	if got := escapeTagValue(`cost${x}|\usd`); got != `cost\$\{x\}\|\\usd` {
+		t.Fatalf("query syntax characters = %q", got)
 	}
 }
 
