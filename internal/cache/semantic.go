@@ -217,6 +217,11 @@ func searchResultFields(results interface{}) (data string, score float64, found 
 		if !ok {
 			return "", 0, false, fmt.Errorf("RESP3 result has no extra_attributes field")
 		}
+		if mapLength(rawAttributes) == 0 {
+			// Redis Search can briefly retain an index result after the backing hash
+			// expires. With no stored fields left, it is a miss rather than corrupt data.
+			return "", 0, false, nil
+		}
 		dataValue, dataOK := mapField(rawAttributes, "data")
 		scoreValue, scoreOK := mapField(rawAttributes, "score")
 		if !dataOK || !scoreOK {
@@ -268,6 +273,17 @@ func mapField(value interface{}, key string) (interface{}, bool) {
 		return result, ok
 	default:
 		return nil, false
+	}
+}
+
+func mapLength(value interface{}) int {
+	switch fields := value.(type) {
+	case map[interface{}]interface{}:
+		return len(fields)
+	case map[string]interface{}:
+		return len(fields)
+	default:
+		return -1
 	}
 }
 
