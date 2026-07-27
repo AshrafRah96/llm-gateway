@@ -77,7 +77,6 @@ type lifecycle struct {
 	ctx        context.Context
 	req        Request
 	model      router.Model
-	namespace  cache.Namespace
 	attempt    cache.Attempt
 	started    time.Time
 }
@@ -93,11 +92,11 @@ func (c *Completion) begin(ctx context.Context, req Request) *lifecycle {
 		ctx:        ctx,
 		req:        req,
 		model:      model,
-		namespace:  cache.NewNamespace(req.APIKey, model.ID),
 		started:    time.Now(),
 	}
 
-	attempt, err := c.cache.Begin(ctx, l.namespace, req.Prompt)
+	namespace := cache.NewNamespace(req.APIKey, model.ID)
+	attempt, err := c.cache.Begin(ctx, namespace, req.Prompt)
 	if err != nil {
 		log.Printf("cache error: %v", err)
 		return l
