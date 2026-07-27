@@ -33,7 +33,9 @@ func main() {
 		redisAddr = "localhost:6379"
 	}
 
-	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
+	// RediSearch's typed responses are stable under RESP2; go-redis still marks
+	// the RESP3 search response format as unstable.
+	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr, Protocol: 2})
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		log.Fatalf("redis: %v", err)
 	}

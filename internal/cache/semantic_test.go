@@ -100,6 +100,7 @@ func TestSemanticCacheSearchFailureIsReturned(t *testing.T) {
 	client := redis.NewClient(&redis.Options{
 		Addr:       "127.0.0.1:0",
 		MaxRetries: -1,
+		Protocol:   2,
 	})
 	t.Cleanup(func() { client.Close() })
 
