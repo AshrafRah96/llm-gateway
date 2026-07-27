@@ -46,7 +46,7 @@ func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}
-	// Close is what meters, logs and caches the stream.
+	// Exhaustion settles normal streams; Close is the fallback when the client leaves.
 	defer stream.Close()
 
 	w.Header().Set("Content-Type", "text/event-stream")

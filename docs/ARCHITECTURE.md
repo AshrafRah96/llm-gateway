@@ -45,6 +45,11 @@ accumulates provider-neutral content and usage events while applying cache and b
 policy. OpenAI framing stays inside the provider adapter; outbound SSE framing stays
 inside the HTTP handler.
 
+A private request lifecycle owns routing, namespace construction, the cache attempt,
+metering, logging and store eligibility for both delivery modes. A normal stream settles
+that lifecycle when its provider ends. `Close` crosses the same idempotent settlement
+path only as the fallback for an abandoned stream.
+
 The cache and rate limiter each have real adapter seams. Production uses Redis and
 OpenAI; tests use deterministic adapters without external calls.
 

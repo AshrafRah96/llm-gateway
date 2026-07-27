@@ -28,6 +28,60 @@ func drain(t *testing.T, s *Stream) []StreamChunk {
 	return out
 }
 
+func TestStreamSettlesWhenExhausted(t *testing.T) {
+	tests := []struct {
+		name          string
+		events        []ProviderEvent
+		cacheEntry    *cache.CacheEntry
+		wantRecords   int
+		wantStores    int
+		wantEstimated bool
+	}{
+		{
+			name:        "complete provider stream",
+			events:      completeEvents,
+			wantRecords: 1,
+			wantStores:  1,
+		},
+		{
+			name: "truncated provider stream",
+			events: []ProviderEvent{
+				{Content: "partial answer"},
+			},
+			wantRecords:   1,
+			wantEstimated: true,
+		},
+		{
+			name:       "cache replay",
+			cacheEntry: &cache.CacheEntry{Response: []byte(okBody), Status: http.StatusOK},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &fakeProvider{events: tt.events, status: http.StatusOK}
+			c, fc, fr := newFixture(p)
+			fc.entry = tt.cacheEntry
+
+			s, err := c.Stream(context.Background(), Request{APIKey: "key-1", Prompt: "hello"})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			drain(t, s)
+
+			if fr.calls != tt.wantRecords {
+				t.Errorf("usage records = %d, want %d", fr.calls, tt.wantRecords)
+			}
+			if fc.sets != tt.wantStores {
+				t.Errorf("cache stores = %d, want %d", fc.sets, tt.wantStores)
+			}
+			if fr.estimated != tt.wantEstimated {
+				t.Errorf("estimated = %v, want %v", fr.estimated, tt.wantEstimated)
+			}
+		})
+	}
+}
+
 func TestStream_PassesChunksThroughInOrder(t *testing.T) {
 	p := &fakeProvider{events: completeEvents, status: http.StatusOK}
 	c, _, _ := newFixture(p)
@@ -84,7 +138,7 @@ func TestStream_UsageChunkIsNotForwardedToTheClient(t *testing.T) {
 }
 
 // This is the regression the review found: streams used to be unmetered entirely.
-func TestStream_CloseRecordsUsage(t *testing.T) {
+func TestStream_ExhaustionRecordsUsageAndClosesProvider(t *testing.T) {
 	p := &fakeProvider{events: completeEvents, status: http.StatusOK}
 	c, _, fr := newFixture(p)
 
@@ -93,13 +147,6 @@ func TestStream_CloseRecordsUsage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	drain(t, s)
-
-	if fr.calls != 0 {
-		t.Error("usage should be recorded on Close, not mid-stream")
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
 
 	if fr.calls != 1 {
 		t.Fatalf("usage recorded %d times, want 1", fr.calls)
@@ -112,6 +159,12 @@ func TestStream_CloseRecordsUsage(t *testing.T) {
 	}
 	if !p.lastStream.closed {
 		t.Error("upstream stream was not closed")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close after automatic settlement: %v", err)
+	}
+	if fr.calls != 1 {
+		t.Fatalf("Close recorded usage again; calls = %d", fr.calls)
 	}
 }
 

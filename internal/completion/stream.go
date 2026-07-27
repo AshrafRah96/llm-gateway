@@ -10,7 +10,6 @@ import (
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
 	"github.com/ashrafrah96/llm-gateway/internal/observability"
-	"github.com/ashrafrah96/llm-gateway/internal/router"
 	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
@@ -45,12 +44,7 @@ type StreamChunk struct {
 // Stream yields provider-neutral content chunks while accumulating everything Close
 // needs in order to meter, log, and cache the exchange.
 type Stream struct {
-	c       *Completion
-	ctx     context.Context
-	req     Request
-	model   router.Model
-	attempt cache.Attempt
-	start   time.Time
+	lifecycle *lifecycle
 
 	body ProviderStream
 
@@ -61,20 +55,20 @@ type Stream struct {
 	tokensIn  int
 	tokensOut int
 
-	complete bool
-	metered  bool
-	err      error
-	done     bool
-	closed   bool
+	complete  bool
+	metered   bool
+	err       error
+	done      bool
+	closed    bool
+	settled   bool
+	settleErr error
 }
 
 func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
-	s := &Stream{c: c, ctx: ctx, req: req, start: time.Now()}
-	s.model = router.Route(req.Prompt)
-	ns := cache.NewNamespace(req.APIKey, s.model.ID)
-	s.attempt = c.beginCacheAttempt(ctx, ns, req.Prompt)
+	l := c.begin(ctx, req)
+	s := &Stream{lifecycle: l}
 
-	if entry := c.lookup(ctx, s.attempt); entry != nil {
+	if entry := l.lookup(ctx); entry != nil {
 		if chunks, ok := replayChunks(entry); ok {
 			s.cacheHit, s.replay = true, chunks
 			return s, nil
@@ -82,7 +76,7 @@ func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 		// An entry we cannot read is a miss, not a failure.
 	}
 
-	body, status, err := c.provider.Stream(ctx, req.Prompt, s.model)
+	body, status, err := c.provider.Stream(ctx, req.Prompt, l.model)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +89,7 @@ func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 	return s, nil
 }
 
-func (s *Stream) Model() string  { return s.model.ID }
+func (s *Stream) Model() string  { return s.lifecycle.model.ID }
 func (s *Stream) CacheHit() bool { return s.cacheHit }
 
 func (s *Stream) Next() (StreamChunk, bool) {
@@ -110,6 +104,10 @@ func (s *Stream) Next() (StreamChunk, bool) {
 		}
 		chunk := s.replay[0]
 		s.replay = s.replay[1:]
+		if chunk.Done {
+			s.done = true
+			_ = s.settle()
+		}
 		return chunk, true
 	}
 
@@ -118,6 +116,7 @@ func (s *Stream) Next() (StreamChunk, bool) {
 		if !ok {
 			s.err = s.body.Err()
 			s.done = true
+			_ = s.settle()
 			return StreamChunk{}, false
 		}
 		if event.Usage != nil {
@@ -127,6 +126,7 @@ func (s *Stream) Next() (StreamChunk, bool) {
 		}
 		if event.Done {
 			s.done, s.complete = true, true
+			_ = s.settle()
 			return StreamChunk{Done: true}, true
 		}
 		if event.Content != "" {
@@ -136,52 +136,56 @@ func (s *Stream) Next() (StreamChunk, bool) {
 	}
 }
 
-// Close meters, logs, and caches the exchange. It is safe to call twice.
+// Close settles a stream only when exhaustion has not already done so. It is the
+// fallback for abandonment and is safe to call twice.
 func (s *Stream) Close() error {
 	if s.closed {
 		return nil
 	}
 	s.closed = true
+	return s.settle()
+}
+
+func (s *Stream) settle() error {
+	if s.settled {
+		return s.settleErr
+	}
+	s.settled = true
 
 	if s.body != nil {
 		s.body.Close()
 	}
 
-	entry := observability.RequestLog{
-		Timestamp: s.start,
-		LatencyMs: time.Since(s.start).Milliseconds(),
-		PromptLen: len(s.req.Prompt),
-		Status:    http.StatusOK,
-	}
+	entry := observability.RequestLog{Status: http.StatusOK}
 
 	if s.cacheHit {
 		entry.CacheHit = true
-		observability.Log(entry)
+		s.lifecycle.log(entry)
 		return nil
 	}
 
 	if !s.metered {
-		s.tokensIn = estimateTokens(s.req.Prompt)
+		s.tokensIn = estimateTokens(s.lifecycle.req.Prompt)
 		s.tokensOut = estimateTokens(s.content.String())
 	}
 
-	entry.Model = s.model.ID
+	entry.Model = s.lifecycle.model.ID
 	entry.TokensIn = s.tokensIn
 	entry.TokensOut = s.tokensOut
-	entry.CostUSD = s.model.Cost(s.tokensIn, s.tokensOut)
+	entry.CostUSD = s.lifecycle.model.Cost(s.tokensIn, s.tokensOut)
 	entry.Estimated = !s.metered
-	observability.Log(entry)
+	s.lifecycle.log(entry)
 
 	// Settlement must outlive a request cancelled by a disconnected client, but it is
 	// bounded so abandoned streams cannot create unbounded background work.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), settleTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.lifecycle.ctx), settleTimeout)
 	defer cancel()
 
-	s.c.meter(ctx, usage.Entry{
-		APIKey:    s.req.APIKey,
+	s.lifecycle.meter(ctx, usage.Entry{
+		APIKey:    s.lifecycle.req.APIKey,
 		TokensIn:  s.tokensIn,
 		TokensOut: s.tokensOut,
-		CostUSD:   s.model.Cost(s.tokensIn, s.tokensOut),
+		CostUSD:   s.lifecycle.model.Cost(s.tokensIn, s.tokensOut),
 		Estimated: !s.metered,
 	})
 
@@ -190,12 +194,13 @@ func (s *Stream) Close() error {
 		if s.err != nil {
 			log.Printf("stream read error: %v", s.err)
 		}
-		return s.err
+		s.settleErr = s.err
+		return s.settleErr
 	}
 	if body, ok := assemble(s.content.String(), s.tokensIn, s.tokensOut); ok {
-		s.c.store(ctx, s.attempt, body, http.StatusOK)
+		s.lifecycle.store(ctx, body, http.StatusOK)
 	}
-	return nil
+	return s.settleErr
 }
 
 func estimateTokens(s string) int {

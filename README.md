@@ -149,6 +149,10 @@ requests were estimated:
 The request log marks them too, with `"estimated": true`. If a charge looks wrong, that
 tells you whether the number was measured or inferred.
 
+Normal streams settle their cache, usage and log records as soon as the provider
+finishes. The handler's deferred close uses the same idempotent settlement path only
+when a caller disconnects before exhaustion.
+
 ## Running it
 
 The quickest way is compose, which brings up redis-stack alongside the gateway:
