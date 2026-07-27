@@ -7,14 +7,14 @@ func TestRoute(t *testing.T) {
 		prompt string
 		want   Model
 	}{
-		{"What is 2+2?", ModelCheap},
-		{"Hello", ModelCheap},
-		{"analyze this data", ModelPowerful},
-		{"please code a function", ModelPowerful},
-		{"compare these options", ModelPowerful},
-		{"debug this issue", ModelPowerful},
-		{"explain step by step how to", ModelPowerful},
-		{string(make([]byte, 501)), ModelPowerful}, // long prompt
+		{"What is 2+2?", Cheap},
+		{"Hello", Cheap},
+		{"analyze this data", Powerful},
+		{"please code a function", Powerful},
+		{"compare these options", Powerful},
+		{"debug this issue", Powerful},
+		{"explain step by step how to", Powerful},
+		{string(make([]byte, 501)), Powerful}, // long prompt
 	}
 
 	for _, tt := range tests {

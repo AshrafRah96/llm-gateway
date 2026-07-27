@@ -11,6 +11,7 @@ import (
 
 	"github.com/ashrafrah96/llm-gateway/internal/auth"
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
+	"github.com/ashrafrah96/llm-gateway/internal/completion"
 	"github.com/ashrafrah96/llm-gateway/internal/handler"
 	"github.com/ashrafrah96/llm-gateway/internal/middleware"
 	"github.com/ashrafrah96/llm-gateway/internal/provider"
@@ -32,7 +33,9 @@ func main() {
 		redisAddr = "localhost:6379"
 	}
 
-	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
+	// RediSearch's typed responses are stable under RESP2; go-redis still marks
+	// the RESP3 search response format as unstable.
+	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr, Protocol: 2})
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		log.Fatalf("redis: %v", err)
 	}
@@ -42,14 +45,20 @@ func main() {
 	rateLimitStore := ratelimit.NewRedisStore(redisClient)
 	limiter := ratelimit.New(rateLimitStore, ratelimit.DefaultConfig())
 	embedder := cache.NewEmbeddingClient(apiKey)
+	cacheTTL, err := cache.ParseTTL(os.Getenv("CACHE_TTL"))
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	semanticCache, err := cache.NewSemanticCache(redisClient, embedder)
+	semanticCache, err := cache.NewSemanticCache(redisClient, embedder, cacheTTL)
 	if err != nil {
 		log.Fatalf("semantic cache: %v", err)
 	}
 
 	usageTracker := usage.NewTracker(redisClient)
-	h := handler.New(openaiClient, semanticCache, usageTracker, limiter)
+
+	completions := completion.New(openaiClient, semanticCache, usageTracker)
+	h := handler.New(completions, usageTracker, limiter)
 
 	mux := handler.NewServer(h,
 		middleware.Auth(keyStore),

@@ -30,16 +30,7 @@ func New(store Store, config Config) *Limiter {
 }
 
 func (l *Limiter) Allow(ctx context.Context, key string) (bool, time.Duration, error) {
-	count, err := l.store.Increment(ctx, key, l.config.Window)
-	if err != nil {
-		return false, 0, err
-	}
-
-	if count > l.config.MaxRequests {
-		return false, l.config.Window, nil
-	}
-
-	return true, 0, nil
+	return l.store.Allow(ctx, key, l.config.MaxRequests, l.config.Window)
 }
 
 func (l *Limiter) Status(ctx context.Context, key string) (int, int, time.Duration, error) {

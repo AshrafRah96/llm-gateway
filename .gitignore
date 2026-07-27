@@ -1,4 +1,5 @@
 # Binaries
+*.exe
 *.dll
 *.so
 *.dylib
@@ -9,6 +10,7 @@
 bin/
 build/
 dist/
+.cache/
 
 # Go workspace file
 go.work
