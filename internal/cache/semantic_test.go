@@ -112,3 +112,46 @@ func TestSemanticCacheSearchFailureIsReturned(t *testing.T) {
 		t.Fatal("Get hid the Redis search failure")
 	}
 }
+
+func TestParseSearchResultRESP3(t *testing.T) {
+	c := &SemanticCache{}
+	results := map[interface{}]interface{}{
+		"total_results": int64(1),
+		"results": []interface{}{
+			map[interface{}]interface{}{
+				"id": "cache:v2:key",
+				"extra_attributes": map[interface{}]interface{}{
+					"data":  `{"prompt":"p","response":"UGFyaXM=","status":200}`,
+					"score": "0.01",
+				},
+			},
+		},
+	}
+
+	entry, err := c.parseSearchResult(results)
+	if err != nil {
+		t.Fatalf("parseSearchResult: %v", err)
+	}
+	if entry == nil || string(entry.Response) != "Paris" || entry.Status != 200 {
+		t.Fatalf("entry = %+v", entry)
+	}
+}
+
+func TestParseSearchResultRESP3RejectsMalformedData(t *testing.T) {
+	c := &SemanticCache{}
+	results := map[interface{}]interface{}{
+		"total_results": int64(1),
+		"results": []interface{}{
+			map[interface{}]interface{}{
+				"extra_attributes": map[interface{}]interface{}{
+					"data":  "{not-json",
+					"score": "0",
+				},
+			},
+		},
+	}
+
+	if _, err := c.parseSearchResult(results); err == nil {
+		t.Fatal("parseSearchResult accepted malformed RESP3 data")
+	}
+}

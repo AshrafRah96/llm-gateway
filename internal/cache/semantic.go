@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -167,28 +168,12 @@ func (c *SemanticCache) Set(ctx context.Context, ns Namespace, prompt string, re
 }
 
 func (c *SemanticCache) parseSearchResult(results interface{}) (*CacheEntry, error) {
-	arr, ok := results.([]interface{})
-	if !ok || len(arr) < 3 {
-		return nil, nil
+	data, score, found, err := searchResultFields(results)
+	if err != nil {
+		return nil, err
 	}
-
-	fields, ok := arr[2].([]interface{})
-	if !ok || len(fields) < 4 {
+	if !found {
 		return nil, nil
-	}
-
-	var score float64
-	var data string
-	for i := 0; i < len(fields)-1; i += 2 {
-		fieldName, _ := fields[i].(string)
-		switch fieldName {
-		case "score":
-			if s, ok := fields[i+1].(string); ok {
-				fmt.Sscanf(s, "%f", &score)
-			}
-		case "data":
-			data, _ = fields[i+1].(string)
-		}
 	}
 
 	// Cosine distance to similarity
@@ -202,6 +187,120 @@ func (c *SemanticCache) parseSearchResult(results interface{}) (*CacheEntry, err
 	}
 
 	return &entry, nil
+}
+
+func searchResultFields(results interface{}) (data string, score float64, found bool, err error) {
+	switch response := results.(type) {
+	case []interface{}:
+		if len(response) < 3 {
+			return "", 0, false, nil
+		}
+		fields, ok := response[2].([]interface{})
+		if !ok {
+			return "", 0, false, fmt.Errorf("search result fields have type %T", response[2])
+		}
+		return fieldPairs(fields)
+
+	case map[interface{}]interface{}, map[string]interface{}:
+		rawResults, ok := mapField(response, "results")
+		if !ok {
+			return "", 0, false, fmt.Errorf("RESP3 search result has no results field")
+		}
+		documents, ok := rawResults.([]interface{})
+		if !ok {
+			return "", 0, false, fmt.Errorf("RESP3 results have type %T", rawResults)
+		}
+		if len(documents) == 0 {
+			return "", 0, false, nil
+		}
+		rawAttributes, ok := mapField(documents[0], "extra_attributes")
+		if !ok {
+			return "", 0, false, fmt.Errorf("RESP3 result has no extra_attributes field")
+		}
+		dataValue, dataOK := mapField(rawAttributes, "data")
+		scoreValue, scoreOK := mapField(rawAttributes, "score")
+		if !dataOK || !scoreOK {
+			return "", 0, false, fmt.Errorf("RESP3 result is missing data or score")
+		}
+		data, ok = stringValue(dataValue)
+		if !ok {
+			return "", 0, false, fmt.Errorf("RESP3 data has type %T", dataValue)
+		}
+		score, err = numberValue(scoreValue)
+		if err != nil {
+			return "", 0, false, err
+		}
+		return data, score, true, nil
+
+	default:
+		return "", 0, false, fmt.Errorf("search response has type %T", results)
+	}
+}
+
+func fieldPairs(fields []interface{}) (data string, score float64, found bool, err error) {
+	var dataFound, scoreFound bool
+	for i := 0; i+1 < len(fields); i += 2 {
+		fieldName, _ := stringValue(fields[i])
+		switch fieldName {
+		case "data":
+			data, dataFound = stringValue(fields[i+1])
+		case "score":
+			score, err = numberValue(fields[i+1])
+			scoreFound = err == nil
+		}
+	}
+	if err != nil {
+		return "", 0, false, err
+	}
+	if !dataFound || !scoreFound {
+		return "", 0, false, fmt.Errorf("search result is missing data or score")
+	}
+	return data, score, true, nil
+}
+
+func mapField(value interface{}, key string) (interface{}, bool) {
+	switch fields := value.(type) {
+	case map[interface{}]interface{}:
+		result, ok := fields[key]
+		return result, ok
+	case map[string]interface{}:
+		result, ok := fields[key]
+		return result, ok
+	default:
+		return nil, false
+	}
+}
+
+func stringValue(value interface{}) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return typed, true
+	case []byte:
+		return string(typed), true
+	default:
+		return "", false
+	}
+}
+
+func numberValue(value interface{}) (float64, error) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, nil
+	case float32:
+		return float64(typed), nil
+	case int64:
+		return float64(typed), nil
+	case string:
+		number, err := strconv.ParseFloat(typed, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse search score: %w", err)
+		}
+		return number, nil
+	case []byte:
+		return numberValue(string(typed))
+	default:
+		return 0, fmt.Errorf("search score has type %T", value)
+	}
 }
 
 func cacheKey(ns Namespace, prompt string) string {
