@@ -2,18 +2,52 @@
 
 [![CI](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml)
 
-A small server that sits between your app and OpenAI.
+An OpenAI gateway project about the engineering around an LLM call:
+distributed quotas, semantic reuse, streaming cancellation and auditable cost tracking.
 
 Your app sends a prompt here instead of to OpenAI. The gateway checks the caller's
 API key, makes sure they aren't sending too many requests, looks for a cached answer,
 picks a model, calls OpenAI, and records what it cost.
+
+> **Project status:** a production-minded reference implementation and CV project, not
+> a production-ready commercial gateway. Implemented controls and remaining risks are
+> separated in the [threat model](docs/THREAT-MODEL.md) and
+> [roadmap](docs/ROADMAP.md).
+
+### Why this is worth reviewing
+
+| Engineering problem | What this project demonstrates | Evidence |
+|---|---|---|
+| Distributed rate limits | One atomic Redis Lua decision; rejected requests do not consume quota | [ADR-0003](docs/adr/0003-the-store-decides-the-rate-limit.md), [bug write-up](docs/ENGINEERING-NOTES.md#1-the-rate-limiter-that-allowed-twelve-times-its-limit) |
+| Interrupted SSE streams | Cancellation stops upstream work while partial usage is estimated and labelled | [ADR-0006](docs/adr/0006-estimate-and-bill-abandoned-streams.md), [regression test](internal/handler/abandoned_test.go) |
+| Safe semantic reuse | Answers are reused only inside the same tenant, routed model and cache schema | [architecture](docs/ARCHITECTURE.md), [integration tests](internal/cache/semantic_integration_test.go) |
+
+The cache-quality claims are measurable rather than assumed. The repository includes a
+[versioned 40-case corpus](docs/evaluation/cases-v1.json) and an opt-in evaluator for
+precision, recall, hit rate and lookup latency. No result is published until that
+command has run; see [evaluation](docs/EVALUATION.md).
+
+```text
+client → auth → sliding-window limit → route model
+                                      ↓
+                            tenant-safe semantic cache
+                                      │ miss
+                                      ▼
+                                    OpenAI
+                                      ↓
+                           meter + cache + respond
+```
+
+**Stack:** Go, Redis/Redis Search, Lua, Server-Sent Events, Docker and GitHub Actions.
 
 ## What it does
 
 **Caches answers to similar questions.** "What is the capital of France?" and
 "France's capital city?" are different strings but mean the same thing. The gateway
 turns each prompt into a vector and looks for a stored answer that is close enough
-(95% similar). A hit costs nothing and returns immediately.
+(95% similar). A hit costs nothing and returns immediately. Searches are filtered by
+a fingerprint of the caller's key, routed model and schema version; entries expire
+after 24 hours by default.
 
 **Picks a cheaper model when it can.** Short, simple prompts go to `gpt-3.5-turbo`.
 Prompts over 500 characters, or ones containing words like "analyze", "compare" or
@@ -47,13 +81,14 @@ your app
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│ similar      │──── yes ─▶ return the cached answer (X-Cache: HIT)
-│ prompt seen  │
-│ before?      │
+│ pick a model │
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│ pick a model │
+│ similar      │──── yes ─▶ return the cached answer (X-Cache: HIT)
+│ prompt seen  │
+│ for tenant + │
+│ model?       │
 └──────┬───────┘
        ▼
 ┌──────────────┐
@@ -79,8 +114,8 @@ Send your key in the `X-API-Key` header.
 ### Response headers
 
 - `X-Cache` — `HIT` if the answer came from the cache, `MISS` if it came from OpenAI
-- `X-Model` — which model answered (not set on a cache hit, because the stored answer
-  may have come from a different prompt)
+- `X-Model` — which model was called (not set on a cache hit because this request made
+  no model call)
 - `Retry-After` — on a 429, how many seconds to wait
 
 If OpenAI returns an error, the gateway passes its status code through unchanged, so a
@@ -164,6 +199,7 @@ docker run -p 8080:8080 \
 |------------------|--------------------------|------------------|
 | `OPENAI_API_KEY` | Your OpenAI key (needed) | —                |
 | `REDIS_ADDR`     | Where Redis is           | `localhost:6379` |
+| `CACHE_TTL`      | How long answers remain reusable | `24h` |
 
 ## Trying it out
 
@@ -200,16 +236,16 @@ Most tests use fakes and need nothing running. The ones covering Redis skip them
 when no Redis is reachable, so to run everything:
 
 ```bash
-docker run -d -p 6379:6379 redis:7-alpine
+docker run -d -p 6379:6379 redis/redis-stack-server:latest
 REDIS_ADDR=localhost:6379 go test -race ./...
 ```
 
-Plain Redis is enough. Only the semantic cache needs redis-stack, and that package has
-no tests for exactly that reason.
-
-CI runs the same thing and fails the build if the Redis-backed tests skip. A skipped test
-is how one of the bugs in
+CI runs Redis Stack and fails the build if Redis-backed tests skip. A skipped test is
+how one of the bugs in
 [docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md) survived as long as it did.
+
+The real-embedding evaluation is separate from CI because it makes paid OpenAI calls.
+Follow [docs/EVALUATION.md](docs/EVALUATION.md) to run it.
 
 ## Reviewing this
 
@@ -242,22 +278,19 @@ Things that are not done, so you do not have to go looking for them.
 and response shapes match OpenAI's documentation, but documentation is not the wire. The
 end to end smoke test needs a real key and has not been run.
 
-**internal/cache has no tests.** It needs RediSearch, which plain Redis does not have,
-so testing it means a heavier container than CI currently runs. It is the only package
-without coverage.
-
 **The token estimate is unreconciled.** Abandoned streams are billed on a rough four
 bytes per token. Nobody has checked that against an actual OpenAI invoice, and it reads
 low for non-English text.
 
-**The cache is shared across API keys.** Good for hit rate, wrong the moment prompts
-contain anything private. See [adr/0002](docs/adr/0002-cache-on-meaning-not-exact-text.md).
+**Semantic similarity is corpus-dependent.** The 0.95 threshold remains a hypothesis
+until the committed evaluator is run and its precision target is met. Isolation tests
+prove the mechanics, not that every real prompt pair is safe to reuse.
 
 **The routing keyword list is a guess.** It has never been checked against real traffic
 to see how often it picks wrong.
 
-**Configuration is two environment variables.** Rate limits, the cache similarity
-threshold and the model prices are compile time constants.
+**Configuration is deliberately small.** Rate limits, the cache similarity threshold
+and model prices remain compile-time constants. Cache lifetime is configurable.
 
 ## How the code is laid out
 

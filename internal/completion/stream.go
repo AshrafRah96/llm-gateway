@@ -66,6 +66,7 @@ type Stream struct {
 	ctx   context.Context
 	req   Request
 	model router.Model
+	ns    cache.Namespace
 	start time.Time
 
 	body    interface{ Close() error }
@@ -87,16 +88,16 @@ type Stream struct {
 
 func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 	s := &Stream{c: c, ctx: ctx, req: req, start: time.Now()}
+	s.model = router.Route(req.Prompt)
+	s.ns = cache.NewNamespace(req.APIKey, s.model.ID)
 
-	if entry := c.lookup(ctx, req.Prompt); entry != nil {
+	if entry := c.lookup(ctx, s.ns, req.Prompt); entry != nil {
 		if chunks, ok := replayChunks(entry); ok {
 			s.cacheHit, s.replay = true, chunks
 			return s, nil
 		}
 		// An entry we cannot read is a miss, not a failure.
 	}
-
-	s.model = router.Route(req.Prompt)
 
 	body, status, err := c.provider.Stream(ctx, req.Prompt, s.model)
 	if err != nil {
@@ -248,7 +249,7 @@ func (s *Stream) Close() error {
 		return s.err
 	}
 	if body, ok := assemble(s.content.String(), s.tokensIn, s.tokensOut); ok {
-		s.c.store(ctx, s.req.Prompt, body, http.StatusOK)
+		s.c.store(ctx, s.ns, s.req.Prompt, body, http.StatusOK)
 	}
 	return nil
 }

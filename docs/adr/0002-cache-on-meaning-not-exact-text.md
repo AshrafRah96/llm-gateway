@@ -1,6 +1,6 @@
 # ADR-0002: Cache on meaning, not exact text
 
-Status: Accepted
+Status: Superseded in part by ADR-0007
 Date: 2026-07-26
 
 ## Context
@@ -39,7 +39,5 @@ move once there is data to move it with.
 Exact-match caching on a hash of the prompt. Cheap, but it misses almost everything that
 matters.
 
-Caching per API key. Would prevent one tenant seeing another's answers, but destroys the
-hit rate, which is the entire point. Worth revisiting if the gateway ever serves prompts
-containing anything private, at which point sharing answers across keys becomes a
-problem rather than a feature.
+Caching per API key. This was later adopted in ADR-0007: confidentiality matters more
+than the cross-tenant hit rate, and a semantic score is not an authorization check.

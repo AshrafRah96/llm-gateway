@@ -43,8 +43,12 @@ func main() {
 	rateLimitStore := ratelimit.NewRedisStore(redisClient)
 	limiter := ratelimit.New(rateLimitStore, ratelimit.DefaultConfig())
 	embedder := cache.NewEmbeddingClient(apiKey)
+	cacheTTL, err := cache.ParseTTL(os.Getenv("CACHE_TTL"))
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	semanticCache, err := cache.NewSemanticCache(redisClient, embedder)
+	semanticCache, err := cache.NewSemanticCache(redisClient, embedder, cacheTTL)
 	if err != nil {
 		log.Fatalf("semantic cache: %v", err)
 	}
