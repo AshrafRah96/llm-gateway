@@ -1,11 +1,24 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/ashrafrah96/llm-gateway/internal/completion"
 )
+
+type streamResponse struct {
+	Choices []streamResponseChoice `json:"choices"`
+}
+
+type streamResponseChoice struct {
+	Delta streamResponseDelta `json:"delta"`
+}
+
+type streamResponseDelta struct {
+	Content string `json:"content"`
+}
 
 func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
 	req, ok := decode(w, r)
@@ -33,7 +46,7 @@ func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}
-	// Close is what meters, logs and caches the stream.
+	// Exhaustion settles normal streams; Close is the fallback when the client leaves.
 	defer stream.Close()
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -46,8 +59,19 @@ func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Model", stream.Model())
 	}
 
-	for data, ok := stream.Next(); ok; data, ok = stream.Next() {
-		w.Write([]byte("data: " + data + "\n\n"))
+	for chunk, ok := stream.Next(); ok; chunk, ok = stream.Next() {
+		data := []byte("[DONE]")
+		if !chunk.Done {
+			data, err = json.Marshal(streamResponse{
+				Choices: []streamResponseChoice{{
+					Delta: streamResponseDelta{Content: chunk.Content},
+				}},
+			})
+			if err != nil {
+				return
+			}
+		}
+		w.Write(append(append([]byte("data: "), data...), '\n', '\n'))
 		flusher.Flush()
 	}
 }

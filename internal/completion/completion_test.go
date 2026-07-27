@@ -3,9 +3,7 @@ package completion
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
@@ -15,24 +13,18 @@ import (
 
 // ─────────────────────────── fakes ───────────────────────────
 
-type fakeBody struct {
-	io.Reader
-	closed bool
-}
-
-func (b *fakeBody) Close() error { b.closed = true; return nil }
-
 type fakeProvider struct {
-	body   []byte
-	sse    string
-	status int
-	err    error
+	body    []byte
+	events  []ProviderEvent
+	readErr error
+	status  int
+	err     error
 
 	completeCalls int
 	streamCalls   int
 	gotPrompt     string
 	gotModel      router.Model
-	lastBody      *fakeBody
+	lastStream    *fakeProviderStream
 }
 
 func (p *fakeProvider) Complete(ctx context.Context, prompt string, m router.Model) ([]byte, int, error) {
@@ -44,35 +36,75 @@ func (p *fakeProvider) Complete(ctx context.Context, prompt string, m router.Mod
 	return p.body, p.status, nil
 }
 
-func (p *fakeProvider) Stream(ctx context.Context, prompt string, m router.Model) (io.ReadCloser, int, error) {
+func (p *fakeProvider) Stream(ctx context.Context, prompt string, m router.Model) (ProviderStream, int, error) {
 	p.streamCalls++
 	p.gotPrompt, p.gotModel = prompt, m
 	if p.err != nil {
 		return nil, 0, p.err
 	}
-	p.lastBody = &fakeBody{Reader: strings.NewReader(p.sse)}
-	return p.lastBody, p.status, nil
+	p.lastStream = &fakeProviderStream{events: append([]ProviderEvent(nil), p.events...), err: p.readErr}
+	return p.lastStream, p.status, nil
+}
+
+type fakeProviderStream struct {
+	events []ProviderEvent
+	err    error
+	closed bool
+}
+
+func (s *fakeProviderStream) Next() (ProviderEvent, bool) {
+	if len(s.events) == 0 {
+		return ProviderEvent{}, false
+	}
+	event := s.events[0]
+	s.events = s.events[1:]
+	return event, true
+}
+
+func (s *fakeProviderStream) Err() error {
+	return s.err
+}
+
+func (s *fakeProviderStream) Close() error {
+	s.closed = true
+	return nil
 }
 
 type fakeCache struct {
-	entry   *cache.CacheEntry
-	getErr  error
-	setErr  error
-	getNS   cache.Namespace
-	setNS   cache.Namespace
-	sets    int
-	setBody []byte
-	setStat int
+	entry    *cache.CacheEntry
+	beginErr error
+	getErr   error
+	setErr   error
+	getNS    cache.Namespace
+	setNS    cache.Namespace
+	begins   int
+	sets     int
+	setBody  []byte
+	setStat  int
 }
 
-func (c *fakeCache) Get(ctx context.Context, ns cache.Namespace, prompt string) (*cache.CacheEntry, error) {
+func (c *fakeCache) Begin(ctx context.Context, ns cache.Namespace, prompt string) (cache.Attempt, error) {
+	c.begins++
 	c.getNS = ns
+	if c.beginErr != nil {
+		return nil, c.beginErr
+	}
+	return fakeCacheAttempt{cache: c}, nil
+}
+
+type fakeCacheAttempt struct {
+	cache *fakeCache
+}
+
+func (a fakeCacheAttempt) Get(ctx context.Context) (*cache.CacheEntry, error) {
+	c := a.cache
 	return c.entry, c.getErr
 }
 
-func (c *fakeCache) Set(ctx context.Context, ns cache.Namespace, prompt string, response []byte, status int) error {
+func (a fakeCacheAttempt) Set(ctx context.Context, response []byte, status int) error {
+	c := a.cache
 	c.sets++
-	c.setNS = ns
+	c.setNS = c.getNS
 	c.setBody, c.setStat = response, status
 	return c.setErr
 }
@@ -150,6 +182,9 @@ func TestComplete_CacheMissCallsRecordsAndStores(t *testing.T) {
 
 	if fc.sets != 1 || string(fc.setBody) != okBody || fc.setStat != http.StatusOK {
 		t.Errorf("cache stored %d times: %d %s", fc.sets, fc.setStat, fc.setBody)
+	}
+	if fc.begins != 1 {
+		t.Errorf("cache began %d attempts, want one lookup/store attempt", fc.begins)
 	}
 	if fc.getNS != fc.setNS {
 		t.Errorf("cache read namespace %+v differs from write namespace %+v", fc.getNS, fc.setNS)

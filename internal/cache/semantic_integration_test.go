@@ -34,7 +34,7 @@ func redisSearchClient(t *testing.T) *redis.Client {
 
 func newIntegrationCache(t *testing.T, client *redis.Client, embedder Embedder, ttl time.Duration) *SemanticCache {
 	t.Helper()
-	c, err := NewSemanticCache(client, embedder, ttl)
+	c, err := NewSemanticCache(context.Background(), client, embedder, ttl)
 	if err != nil {
 		t.Fatalf("NewSemanticCache: %v", err)
 	}
@@ -46,14 +46,33 @@ func integrationNamespace(t *testing.T, model string) Namespace {
 	return NewNamespace("integration-"+t.Name(), model)
 }
 
+func integrationAttempt(t *testing.T, c *SemanticCache, ns Namespace, prompt string) Attempt {
+	t.Helper()
+	attempt, err := c.Begin(context.Background(), ns, prompt)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	return attempt
+}
+
+func integrationSet(t *testing.T, c *SemanticCache, ns Namespace, prompt string, body []byte, status int) {
+	t.Helper()
+	if err := integrationAttempt(t, c, ns, prompt).Set(context.Background(), body, status); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+}
+
+func integrationGet(t *testing.T, c *SemanticCache, ns Namespace, prompt string) (*CacheEntry, error) {
+	t.Helper()
+	return integrationAttempt(t, c, ns, prompt).Get(context.Background())
+}
+
 func TestSemanticCacheEquivalentPromptHitsWithinNamespace(t *testing.T) {
 	client := redisSearchClient(t)
 	c := newIntegrationCache(t, client, fixedEmbedder{vector: testVector(0)}, time.Hour)
 	ns := integrationNamespace(t, "cheap-model")
 
-	if err := c.Set(context.Background(), ns, "What is France's capital?", []byte(`{"answer":"Paris"}`), 200); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
+	integrationSet(t, c, ns, "What is France's capital?", []byte(`{"answer":"Paris"}`), 200)
 	stored, err := client.HGetAll(context.Background(), cacheKey(ns, "What is France's capital?")).Result()
 	if err != nil {
 		t.Fatalf("HGetAll: %v", err)
@@ -66,7 +85,7 @@ func TestSemanticCacheEquivalentPromptHitsWithinNamespace(t *testing.T) {
 			t.Fatalf("field %q stored the raw API key", field)
 		}
 	}
-	got, err := c.Get(context.Background(), ns, "Name the capital city of France")
+	got, err := integrationGet(t, c, ns, "Name the capital city of France")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -85,9 +104,7 @@ func TestSemanticCacheDoesNotCrossTenantModelOrVersion(t *testing.T) {
 	c := newIntegrationCache(t, client, fixedEmbedder{vector: testVector(0)}, time.Hour)
 	stored := integrationNamespace(t, "cheap-model")
 
-	if err := c.Set(context.Background(), stored, "prompt", []byte(`{"answer":"private"}`), 200); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
+	integrationSet(t, c, stored, "prompt", []byte(`{"answer":"private"}`), 200)
 	oldVersion := stored
 	oldVersion.Version = "v1"
 
@@ -97,7 +114,7 @@ func TestSemanticCacheDoesNotCrossTenantModelOrVersion(t *testing.T) {
 		"version": oldVersion,
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := c.Get(context.Background(), ns, "prompt")
+			got, err := integrationGet(t, c, ns, "prompt")
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -112,12 +129,10 @@ func TestSemanticCacheRejectsDissimilarPrompt(t *testing.T) {
 	client := redisSearchClient(t)
 	ns := integrationNamespace(t, "cheap-model")
 	c := newIntegrationCache(t, client, fixedEmbedder{vector: testVector(0)}, time.Hour)
-	if err := c.Set(context.Background(), ns, "stored", []byte(`{"answer":"stored"}`), 200); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
+	integrationSet(t, c, ns, "stored", []byte(`{"answer":"stored"}`), 200)
 
 	c.embedder = fixedEmbedder{vector: testVector(1)}
-	got, err := c.Get(context.Background(), ns, "unrelated")
+	got, err := integrationGet(t, c, ns, "unrelated")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -130,13 +145,11 @@ func TestSemanticCacheEntryExpires(t *testing.T) {
 	client := redisSearchClient(t)
 	ns := integrationNamespace(t, "cheap-model")
 	c := newIntegrationCache(t, client, fixedEmbedder{vector: testVector(0)}, 50*time.Millisecond)
-	if err := c.Set(context.Background(), ns, "prompt", []byte(`{"answer":"short-lived"}`), 200); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
+	integrationSet(t, c, ns, "prompt", []byte(`{"answer":"short-lived"}`), 200)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		got, err := c.Get(context.Background(), ns, "prompt")
+		got, err := integrationGet(t, c, ns, "prompt")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -164,7 +177,7 @@ func TestSemanticCacheMalformedEntryReturnsError(t *testing.T) {
 	).Err(); err != nil {
 		t.Fatalf("HSet: %v", err)
 	}
-	if _, err := c.Get(context.Background(), ns, "prompt"); err == nil {
+	if _, err := integrationGet(t, c, ns, "prompt"); err == nil {
 		t.Fatal("Get accepted malformed cached JSON")
 	}
 }
@@ -182,7 +195,7 @@ func TestSemanticCacheIgnoresLegacyUnscopedKeys(t *testing.T) {
 	).Err(); err != nil {
 		t.Fatalf("HSet legacy key: %v", err)
 	}
-	got, err := c.Get(context.Background(), ns, "legacy prompt")
+	got, err := integrationGet(t, c, ns, "legacy prompt")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

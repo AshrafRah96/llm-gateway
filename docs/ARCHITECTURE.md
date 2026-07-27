@@ -33,19 +33,37 @@ so an answer produced for one model cannot silently stand in for another.
 
 | Module | Interface seen by callers | Complexity hidden behind it |
 |---|---|---|
+| `application` | Load configuration or build the application | Validation, concrete adapter graph, Redis ownership and HTTP server |
 | `completion` | Complete or stream one request | Routing, caching, provider calls, metering and logging |
-| `cache` | Get or set within a namespace | Embeddings, Redis Search, similarity policy, TTL and schema versioning |
+| `cache` | Begin one attempt within a namespace | One reusable embedding, Redis Search, similarity policy, TTL and schema versioning |
 | `ratelimit` | Allow and status | Sliding-window state and atomic Redis Lua execution |
-| `provider` | Complete or stream | OpenAI HTTP request and response shapes |
-| `handler` | HTTP routes | JSON/SSE translation and response headers |
+| `provider` | Complete or stream semantic events | OpenAI HTTP, SSE scanning and response decoding |
+| `handler` | HTTP routes | Request JSON, stable response SSE and headers |
 
 `completion` is the central module. Both `/chat` and `/chat/stream` cross the same seam
 so their caching and billing behavior cannot drift apart. The streaming implementation
-is more complex because it must forward bytes while accumulating content and usage.
-That complexity stays behind the `Stream` interface.
+accumulates provider-neutral content and usage events while applying cache and billing
+policy. OpenAI framing stays inside the provider adapter; outbound SSE framing stays
+inside the HTTP handler.
+
+A private request lifecycle owns routing, namespace construction, the cache attempt,
+metering, logging and store eligibility for both delivery modes. A normal stream settles
+that lifecycle when its provider ends. `Close` crosses the same idempotent settlement
+path only as the fallback for an abandoned stream.
 
 The cache and rate limiter each have real adapter seams. Production uses Redis and
 OpenAI; tests use deterministic adapters without external calls.
+
+## Startup and shutdown
+
+`internal/application` parses the three environment settings, validates configuration,
+constructs the concrete adapter graph and returns the HTTP server. Redis uses RESP2,
+connectivity is checked before serving, and semantic-cache index creation receives the
+same bounded startup context. The application owns and closes the Redis client.
+
+`main` owns only process lifecycle: a ten-second startup budget, signal handling,
+listening, a thirty-second graceful shutdown budget and application cleanup. Startup
+errors return through the application interface before `main` decides to exit.
 
 ## Semantic-cache namespace
 
@@ -58,6 +76,10 @@ Every cache operation carries:
 Redis Search applies these as hard filters before ranking vectors. Semantic similarity
 can select only within that namespace. Redis keys contain hashes rather than raw keys or
 prompts, and entries expire after `CACHE_TTL` (`24h` by default).
+
+A request begins one cache attempt. The attempt embeds and validates the prompt once,
+then retains the encoded vector for both lookup and a later store. A cacheable miss
+therefore does not pay for a second embedding call.
 
 Schema v2 uses the `cache:v2:` prefix and `prompt_cache_v2` index. Old unscoped entries
 remain unreadable and can be removed separately; there is no unsafe migration path.
