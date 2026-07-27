@@ -1,10 +1,10 @@
 # Architecture
 
-This gateway sits between an application and OpenAI. Its purpose is to keep policy,
-cost control and reusable infrastructure out of every calling application.
+The gateway sits between an application and OpenAI. It keeps routing, quotas, caching
+and cost tracking in one service instead of rebuilding them in every client.
 
-It is a production-minded reference implementation, not a complete production service.
-The [threat model](THREAT-MODEL.md) separates implemented controls from open risks.
+It is a reference implementation, not a complete production service. The
+[threat model](THREAT-MODEL.md) distinguishes current controls from open risks.
 
 ## Request flow
 
@@ -31,7 +31,7 @@ so an answer produced for one model cannot silently stand in for another.
 
 ## Modules and seams
 
-| Module | Interface seen by callers | Complexity hidden behind it |
+| Module | Interface seen by callers | What it owns |
 |---|---|---|
 | `application` | Load configuration or build the application | Validation, concrete adapter graph, Redis ownership and HTTP server |
 | `completion` | Complete or stream one request | Routing, caching, provider calls, metering and logging |
@@ -40,8 +40,8 @@ so an answer produced for one model cannot silently stand in for another.
 | `provider` | Complete or stream semantic events | OpenAI HTTP, SSE scanning and response decoding |
 | `handler` | HTTP routes | Request JSON, stable response SSE and headers |
 
-`completion` is the central module. Both `/chat` and `/chat/stream` cross the same seam
-so their caching and billing behavior cannot drift apart. The streaming implementation
+`completion` is the central module. Both `/chat` and `/chat/stream` use the same policy
+path, which keeps their caching and billing behavior consistent. The streaming code
 accumulates provider-neutral content and usage events while applying cache and billing
 policy. OpenAI framing stays inside the provider adapter; outbound SSE framing stays
 inside the HTTP handler.
@@ -51,8 +51,8 @@ metering, logging and store eligibility for both delivery modes. A normal stream
 that lifecycle when its provider ends. `Close` crosses the same idempotent settlement
 path only as the fallback for an abandoned stream.
 
-The cache and rate limiter each have real adapter seams. Production uses Redis and
-OpenAI; tests use deterministic adapters without external calls.
+Production uses Redis and OpenAI behind the cache, rate-limit and provider interfaces.
+Tests replace those adapters with deterministic local implementations.
 
 ## Startup and shutdown
 
@@ -106,9 +106,9 @@ One Redis deployment currently holds API keys, quotas, usage totals and vector e
 Redis sorted sets plus Lua make the rate-limit decision atomic across gateway instances.
 Redis Search supports vector ranking with tenant/model metadata filters.
 
-This is economical for a portfolio project but couples data with different durability
-needs. A production design should separate disposable cache data from auditable billing
-records.
+One Redis deployment keeps this project small, but it mixes data with different
+durability needs. A production deployment should separate disposable cache entries from
+auditable billing records.
 
 ## Further reading
 

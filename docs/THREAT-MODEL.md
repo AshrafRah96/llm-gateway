@@ -1,7 +1,7 @@
 # Threat model
 
-This document makes the security claim deliberately narrow: the gateway demonstrates
-important controls, but it is not ready for untrusted public traffic.
+The gateway has some important controls, but it is not ready for untrusted public
+traffic. This document says what is protected today and what still needs work.
 
 ## Assets
 
@@ -27,13 +27,13 @@ client and limiting what one tenant can observe or spend.
 
 ### Cross-tenant cache disclosure
 
-Vector similarity alone is not an authorization rule. Cache searches are therefore
-filtered by a SHA-256 tenant fingerprint, routed model and schema version before Redis
-ranks candidates. Entries also expire. Integration tests cover tenant and model
-isolation, expiry, malformed entries and legacy-key exclusion.
+Vector similarity is not an authorization rule. Redis filters cache searches by a
+SHA-256 tenant fingerprint, routed model and schema version before ranking candidates.
+Entries also expire. Integration tests cover tenant and model isolation, expiry,
+malformed entries and legacy-key exclusion.
 
-The raw client key is not stored in semantic-cache keys or metadata. This is only cache
-hardening: the authentication set and usage keys still need stronger key handling.
+Semantic-cache keys and metadata do not contain the raw client key. The authentication
+set and usage keys still need stronger key handling.
 
 ### Cost and availability
 
@@ -45,8 +45,8 @@ hardening: the authentication set and usage keys still need stronger key handlin
 
 ### Verification
 
-Redis-backed tests run against Redis Stack in CI. CI fails if those tests skip. The
-semantic threshold has a separate labelled evaluation rather than being treated as a
+Redis-backed tests run against Redis Stack in CI. CI fails if those tests skip. A
+separate labelled evaluation measures the semantic threshold; the threshold is not a
 security guarantee.
 
 ## Open risks

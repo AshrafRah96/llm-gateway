@@ -5,9 +5,9 @@ Date: 2026-07-27
 
 ## Context
 
-ADR-0002 originally chose a shared semantic cache to maximise hit rate. That permits a
-prompt from one API key to receive another key's stored response. A similarity score is
-not an authorization check, and prompts may contain private data.
+ADR-0002 originally used a shared semantic cache to maximise hit rate. That design could
+return one API key's stored response to another key. Prompts may contain private data,
+and a similarity score does not authorize disclosure.
 
 A model or cache-format change can also make an otherwise similar answer stale.
 
@@ -24,8 +24,8 @@ to 24 hours. Use a new `cache:v2:` prefix and index, and never read old unscoped
 
 ## Consequences
 
-Tenants cannot benefit from one another's cached answers, so the hit rate will be lower.
-That cost is accepted because confidentiality is not a performance tradeoff.
+Tenants no longer share cached answers, so the hit rate will be lower. Confidentiality
+takes precedence over those extra hits.
 
 Raw API keys and prompts do not appear in semantic-cache key names. The fingerprint is
 stable, so weak client keys could still be guessed offline; stronger authentication-key

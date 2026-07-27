@@ -2,19 +2,18 @@
 
 [![CI](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml)
 
-An OpenAI gateway project about the engineering around an LLM call:
-distributed quotas, semantic reuse, streaming cancellation and auditable cost tracking.
+An OpenAI gateway focused on the engineering around an LLM call: distributed quotas,
+semantic reuse, streaming cancellation and cost tracking.
 
 Your app sends a prompt here instead of to OpenAI. The gateway checks the caller's
 API key, makes sure they aren't sending too many requests, looks for a cached answer,
 picks a model, calls OpenAI, and records what it cost.
 
-> **Project status:** a production-minded reference implementation and CV project, not
-> a production-ready commercial gateway. Implemented controls and remaining risks are
-> separated in the [threat model](docs/THREAT-MODEL.md) and
-> [roadmap](docs/ROADMAP.md).
+> This is a reference implementation and CV project, not a production-ready commercial
+> gateway. The [threat model](docs/THREAT-MODEL.md) lists the controls that exist today,
+> and the [roadmap](docs/ROADMAP.md) lists the work still missing.
 
-### Why this is worth reviewing
+### What is implemented
 
 | Engineering problem | What this project demonstrates | Evidence |
 |---|---|---|
@@ -22,10 +21,10 @@ picks a model, calls OpenAI, and records what it cost.
 | Interrupted SSE streams | Cancellation stops upstream work while partial usage is estimated and labelled | [ADR-0006](docs/adr/0006-estimate-and-bill-abandoned-streams.md), [regression test](internal/handler/abandoned_test.go) |
 | Safe semantic reuse | Answers are reused only inside the same tenant, routed model and cache schema | [architecture](docs/ARCHITECTURE.md), [integration tests](internal/cache/semantic_integration_test.go) |
 
-The cache-quality claims are measurable rather than assumed. The repository includes a
-[versioned 40-case corpus](docs/evaluation/cases-v1.json) and an opt-in evaluator for
-precision, recall, hit rate and lookup latency. No result is published until that
-command has run; see [evaluation](docs/EVALUATION.md).
+The repository includes a [versioned 40-case corpus](docs/evaluation/cases-v1.json) and
+an opt-in evaluator for cache precision, recall, hit rate and lookup latency. There is
+no published score yet because the evaluator has not been run in a controlled
+environment. The [evaluation guide](docs/EVALUATION.md) explains how to run it.
 
 ```text
 client → auth → sliding-window limit → route model
@@ -38,33 +37,30 @@ client → auth → sliding-window limit → route model
                            meter + cache + respond
 ```
 
-**Stack:** Go, Redis/Redis Search, Lua, Server-Sent Events, Docker and GitHub Actions.
+Stack: Go, Redis/Redis Search, Lua, Server-Sent Events, Docker and GitHub Actions.
 
 ## What it does
 
-**Caches answers to similar questions.** "What is the capital of France?" and
-"France's capital city?" are different strings but mean the same thing. The gateway
-turns each prompt into a vector and looks for a stored answer that is close enough
-(95% similar). A hit costs nothing and returns immediately. Searches are filtered by
-a fingerprint of the caller's key, routed model and schema version; entries expire
-after 24 hours by default.
+The semantic cache treats reworded questions as potential matches. "What is the capital
+of France?" and "France's capital city?" are different strings, but should produce the
+same answer. The gateway embeds each prompt and accepts a stored answer at 95%
+similarity or above. Searches stay within the caller, routed model and cache schema;
+entries expire after 24 hours by default.
 
-**Picks a cheaper model when it can.** Short, simple prompts go to `gpt-3.5-turbo`.
-Prompts over 500 characters, or ones containing words like "analyze", "compare" or
-"debug", go to `gpt-4`. This is a keyword check, not another model call, so it adds
-no delay and no cost.
+Short prompts use `gpt-3.5-turbo`. Prompts over 500 characters, or prompts containing
+words such as "analyze", "compare" or "debug", use `gpt-4`. This is a local keyword
+check, so routing does not add another model call.
 
-**Limits how often each key can call.** 10 requests per minute by default, counted
-over a sliding window. Requests that get refused do not count against the limit, so
-a caller that keeps retrying still recovers as soon as its earlier requests age out.
+Each API key gets 10 requests per minute by default, counted over a sliding window.
+Rejected attempts do not consume quota. A client that retries too soon will recover
+when its earlier accepted requests age out.
 
-**Tracks spend per API key.** Every request records its tokens and its cost in USD.
-Streamed requests are counted too, including ones the caller abandons — see below.
+The gateway records tokens and USD cost per API key. Streaming requests count too,
+including requests abandoned before the final usage chunk arrives.
 
-**Streams when you want it to.** `/chat/stream` emits stable content-delta
-server-sent events. The OpenAI adapter decodes the upstream wire format first, so
-provider-specific framing does not leak into completion policy. Streamed answers are
-cached and billed exactly like normal ones.
+`/chat/stream` emits content-delta server-sent events. The OpenAI adapter decodes the
+provider's wire format before completion policy sees it. Complete streamed answers use
+the same cache and billing path as non-streamed answers.
 
 ## How a request flows
 
@@ -115,10 +111,10 @@ Send your key in the `X-API-Key` header.
 
 ### Response headers
 
-- `X-Cache` — `HIT` if the answer came from the cache, `MISS` if it came from OpenAI
-- `X-Model` — which model was called (not set on a cache hit because this request made
+- `X-Cache`: `HIT` if the answer came from the cache, `MISS` if it came from OpenAI
+- `X-Model`: which model was called (not set on a cache hit because this request made
   no model call)
-- `Retry-After` — on a 429, how many seconds to wait
+- `Retry-After`: on a 429, how many seconds to wait
 
 If OpenAI returns an error, the gateway passes its status code through unchanged, so a
 429 from OpenAI reaches you as a 429. Both `/chat` and `/chat/stream` behave the same way.
@@ -127,7 +123,7 @@ If OpenAI returns an error, the gateway passes its status code through unchanged
 
 If you stop reading a stream part way through, the gateway drops the connection to
 OpenAI, which stops generating. That saves money, but it also means OpenAI never sends
-its final token count — it arrives at the very end or not at all.
+its final token count. It arrives at the very end or not at all.
 
 Those tokens were still used. Your prompt was charged in full, and so was whatever got
 generated before the cut. Recording nothing would quietly write off a real cost, so the
@@ -181,7 +177,7 @@ Everything else works on plain Redis.
 
 ### Adding an API key
 
-Keys live in a Redis set called `api_keys`. There is no admin endpoint — add them
+Keys live in a Redis set called `api_keys`. There is no admin endpoint, so add them
 directly:
 
 ```bash
@@ -203,7 +199,7 @@ docker run -p 8080:8080 \
 
 | Variable         | What it is               | Default          |
 |------------------|--------------------------|------------------|
-| `OPENAI_API_KEY` | Your OpenAI key (needed) | —                |
+| `OPENAI_API_KEY` | Your OpenAI key (needed) | required         |
 | `REDIS_ADDR`     | Where Redis is           | `localhost:6379` |
 | `CACHE_TTL`      | How long answers remain reusable | `24h` |
 
@@ -220,7 +216,7 @@ curl -X POST http://localhost:8080/chat \
   -H "X-API-Key: some-secret-key" \
   -d '{"prompt": "What is the capital of France?"}'
 
-# ask it a different way — this one should come back as a cache hit
+# ask it a different way; this one should come back as a cache hit
 curl -i -X POST http://localhost:8080/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: some-secret-key" \
@@ -259,8 +255,7 @@ Follow [docs/EVALUATION.md](docs/EVALUATION.md) to run it.
 
 ## Reviewing this
 
-If you are reading this to judge the code rather than to use it, these are the parts
-worth your time.
+For a code review, start at the boundaries where provider data becomes gateway policy.
 
 Start with [internal/provider/openai.go](internal/provider/openai.go), where OpenAI's
 SSE wire format becomes provider-neutral content, usage and completion events. Then read
@@ -271,10 +266,9 @@ Then [internal/ratelimit/redis.go](internal/ratelimit/redis.go), specifically th
 script and the comment explaining why the timestamps are milliseconds. That comment is
 the fix for a bug that let roughly twelve times the configured rate through.
 
-[docs/adr/](docs/adr/) has the decisions and what was rejected.
-[docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md) writes up the two real bugs: how
-they were found, why the tests missed them, and what pins them now. That is probably the
-most useful thing here.
+[docs/adr/](docs/adr/) records the decisions and rejected alternatives.
+[docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md) covers two bugs, why the tests
+missed them, and the regression tests that now catch them.
 
 For the tests, [internal/handler/abandoned_test.go](internal/handler/abandoned_test.go)
 is the one I would look at. It cancels a request mid stream against a real provider and
@@ -282,25 +276,18 @@ checks the caller still gets billed.
 
 ## Known limitations
 
-Things that are not done, so you do not have to go looking for them.
+These limitations are still open:
 
-**Never run against real OpenAI.** Every provider test uses a local fake. The request
-and response shapes match OpenAI's documentation, but documentation is not the wire. The
-end to end smoke test needs a real key and has not been run.
-
-**The token estimate is unreconciled.** Abandoned streams are billed on a rough four
-bytes per token. Nobody has checked that against an actual OpenAI invoice, and it reads
-low for non-English text.
-
-**Semantic similarity is corpus-dependent.** The 0.95 threshold remains a hypothesis
-until the committed evaluator is run and its precision target is met. Isolation tests
-prove the mechanics, not that every real prompt pair is safe to reuse.
-
-**The routing keyword list is a guess.** It has never been checked against real traffic
-to see how often it picks wrong.
-
-**Configuration is deliberately small.** Rate limits, the cache similarity threshold
-and model prices remain compile-time constants. Cache lifetime is configurable.
+- Provider tests use local fakes. Their request and response shapes follow OpenAI's
+  documentation, but the end-to-end smoke test has not run against a real account.
+- Abandoned streams use a rough estimate of four bytes per token. It has not been
+  reconciled against an OpenAI invoice and will undercount some non-English text.
+- The 0.95 similarity threshold remains a hypothesis until the committed evaluator
+  meets its precision target. Isolation tests prove the mechanics, not the quality of
+  every possible match.
+- The routing keyword list has not been checked against real traffic.
+- Rate limits, similarity threshold and model prices are compile-time constants. Only
+  cache lifetime is configurable.
 
 ## How the code is laid out
 
@@ -326,15 +313,10 @@ caching and billing, and nobody noticed.
 The decisions with a real tradeoff behind them are written up in [docs/adr/](docs/adr/),
 including what got rejected. The short version:
 
-**Sliding window rate limiting.** A fixed window lets someone send a full window's
-worth of requests at the end of one window and again at the start of the next. A
-sliding window spreads it out.
-
-**Cache on meaning, not exact text.** Exact-match caching misses anything reworded,
-which is most of what people actually send.
-
-**Keyword routing instead of a classifier.** Asking a model which model to use costs
-a call and adds delay. Checking length and a word list is good enough and free.
-
-**One place to add a model.** A model's id, description and price live together in
-`internal/router`. Add one there and billing, routing and `/models` all pick it up.
+- The rate limiter uses a sliding window. A fixed window would allow a burst at the end
+  of one window and another at the start of the next.
+- The cache compares meaning instead of exact text, so reworded prompts can hit.
+- Routing checks prompt length and keywords. Asking another model to choose would add a
+  paid call before every completion.
+- A model's ID, description and price live together in `internal/router`. Billing,
+  routing and `/models` all read that catalogue.

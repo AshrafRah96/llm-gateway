@@ -24,8 +24,8 @@ So a rejected request still landed in the window. A client that kept retrying ke
 pushing its own lockout forward and never recovered, because every refused attempt reset
 the clock it was waiting on.
 
-The test suite agreed with the bug. The mock store incremented a counter exactly the way
-the real one did, so it reproduced the behaviour faithfully and asserted it was correct.
+The tests copied the bug. The mock store incremented a counter the same way as the real
+store, then asserted that behavior was correct.
 
 ## Decision
 
@@ -48,8 +48,9 @@ See `internal/ratelimit/store.go`.
 Refused requests stop consuming budget, so a hammering client recovers as soon as its
 accepted requests age out.
 
-The Redis adapter does it in one Lua script instead of four pipelined commands, so the
-decision is atomic across gateway instances rather than merely usually correct.
+The Redis adapter makes the decision in one Lua script instead of four pipelined
+commands. Concurrent gateway instances therefore cannot accept against the same stale
+count.
 
 `retryAfter` is now the real time until a slot frees, computed from the oldest accepted
 request, rather than a flat window length.

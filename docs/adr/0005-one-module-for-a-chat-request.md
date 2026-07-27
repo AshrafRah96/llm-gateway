@@ -14,9 +14,9 @@ Except the streaming one did not contain most of that. It decoded, validated, ro
 called the provider, and forwarded bytes. No cache lookup, no cache write, no usage
 recording, no cost, no logging.
 
-That is what happens when the knowledge of "what a chat request does" lives in the
-handlers instead of in one place. The second handler was written by copying part of the
-first, and the missing parts were invisible because nothing named them.
+The sequence that defines a chat request had no owner. The streaming handler copied part
+of the normal handler, and its omissions were hard to see because no shared operation
+named the whole sequence.
 
 The cost was not theoretical. Streamed traffic was absent from `/usage` entirely, so a
 customer who streamed every request was billed nothing.
@@ -45,8 +45,8 @@ The HTTP handlers decode, call, and encode. Nothing else.
 
 ## Consequences
 
-Streaming and non-streaming cannot drift apart, because there is only one description of
-what a chat request does. Streams are now cached, metered, costed and logged.
+Streaming and non-streaming now use the same request lifecycle. Streams are cached,
+metered, costed and logged through the same policy path.
 
 Both handlers share one `decode`, so they cannot disagree about what a valid request
 looks like.
@@ -69,6 +69,5 @@ handler owns outbound SSE encoding. Each module is tested through its own interf
 Keeping the logic in `internal/handler` as a non-HTTP type. Fewer files, but the module
 would sit in the package named after the transport it is meant to be independent of.
 
-A shared helper function called by both handlers. Removes the duplication without
-removing the problem: nothing stops a third caller skipping the helper, and the helper's
-inputs and outputs would still be HTTP-shaped.
+A shared helper called by both handlers. It would reduce duplication, but a later caller
+could bypass it and its inputs and outputs would remain tied to HTTP.

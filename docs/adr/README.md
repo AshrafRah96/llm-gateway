@@ -1,10 +1,9 @@
 # Decision records
 
-Short notes on the decisions in this codebase that had a real tradeoff, and what got
-rejected along the way. Written so that somebody reading the code later does not have to
-guess why it looks like this.
+These notes record decisions that involved a real tradeoff, including the alternatives
+that did not make it into the code.
 
-| # | Decision | Why it was interesting |
+| # | Decision | Why it mattered |
 |---|----------|------------------------|
 | [0001](0001-keyword-routing-instead-of-a-classifier.md) | Route with keywords, not a classifier model | Paying per request to decide how much to spend is a bad trade |
 | [0002](0002-cache-on-meaning-not-exact-text.md) | Cache on meaning, not exact text | Exact-match caching misses almost everything people actually send |
@@ -14,5 +13,5 @@ guess why it looks like this.
 | [0006](0006-estimate-and-bill-abandoned-streams.md) | Estimate and bill abandoned streams | Cancelling kills the usage chunk, so every abandoned stream was free |
 | [0007](0007-isolate-semantic-cache-by-tenant-and-model.md) | Isolate the semantic cache | Similarity is not authorization; tenant and model are hard filters |
 
-Numbers 3, 4 and 6 came out of finding bugs. Those are written up at greater length in
-[../ENGINEERING-NOTES.md](../ENGINEERING-NOTES.md).
+ADRs 3, 4 and 6 came from bugs. The longer accounts are in
+[the engineering notes](../ENGINEERING-NOTES.md).

@@ -24,9 +24,9 @@ like `1.7717e+18`. Many distinct timestamps produce the same string.
 overwrote each other instead of accumulating, and the set held a handful of entries no
 matter how much traffic arrived.
 
-Measured against Redis 5.0.14, a burst of 50 accepted requests left 4 in the window, and
-the limiter then allowed a request that should have been refused. The configured limit
-was passing roughly twelve times the intended rate while reporting healthy.
+Against Redis 5.0.14, a burst of 50 accepted requests left only 4 in the window. The
+limiter then accepted a request that should have been refused, allowing roughly twelve
+times the configured rate.
 
 ## Decision
 
@@ -36,10 +36,10 @@ Score in milliseconds, and pass the member in from Go as a separate random strin
 redis.call('ZADD', key, now, member)   -- now = UnixMilli, member = ARGV[4]
 ```
 
-Millisecond timestamps are about 1.8e12, comfortably inside the exact integer range, and
-they render without scientific notation. The member no longer derives from the score, so
-two requests in the same millisecond cannot collide. Uniqueness comes from
-`rand.Uint64()`, which also holds across gateway instances sharing one Redis.
+Millisecond timestamps are about 1.8e12, inside the exact integer range, and render
+without scientific notation. The member no longer derives from the score, so two
+requests in the same millisecond do not collide. `rand.Uint64()` supplies uniqueness
+across gateway instances sharing one Redis.
 
 See `internal/ratelimit/redis.go`.
 

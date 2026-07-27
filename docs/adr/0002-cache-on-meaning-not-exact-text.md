@@ -5,10 +5,9 @@ Date: 2026-07-26
 
 ## Context
 
-A cache keyed on the prompt string is easy to build and almost useless here. "What is
-the capital of France?" and "France's capital city?" hash differently, so an exact-match
-cache misses. People reword constantly, and the whole value of caching an LLM response
-is avoiding a call that costs real money.
+A prompt-string cache is easy to build but misses ordinary rewordings. "What is the
+capital of France?" and "France's capital city?" hash differently even though the
+answer should be the same. Those misses still trigger a paid completion.
 
 ## Decision
 
@@ -31,10 +30,9 @@ unique.
 Redis has to be the redis-stack image. Plain Redis has no vector search, so the gateway
 will not start against it.
 
-The 0.95 threshold is a guess that has never been tuned against real traffic. Too low
-and users get answers to questions they did not ask, which is worse than a cache miss.
-Too high and it degrades to exact matching. It sits in one constant, so it is easy to
-move once there is data to move it with.
+The 0.95 threshold has not been tuned against real traffic. Too low, and users receive
+answers to questions they did not ask. Too high, and useful rewordings miss. The value
+lives in one constant so measured evaluation can change it later.
 
 ## What we rejected
 

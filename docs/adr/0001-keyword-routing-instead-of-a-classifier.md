@@ -30,14 +30,13 @@ Routing costs nothing and adds no latency. It is also crude, and it will get thi
 wrong in both directions. A short prompt can be hard ("prove Fermat's last theorem") and
 a long one can be trivial (a wall of text with "summarise this" on the end).
 
-The wrongness is cheap to observe, because every request logs the model it picked
-alongside the prompt length. If the logs show a pattern of bad calls, the keyword list
-is one file and one test away from changing.
+Misroutes are easy to spot because every request logs the selected model and prompt
+length. If the logs show a pattern, the rule lives in one file with a focused test.
 
 ## What we rejected
 
-A classifier model. Revisit if the logs show routing mistakes costing more than a
-classifier would, which would take a lot of mistakes at current prices.
+A classifier model. Revisit this if measured routing mistakes cost more than an extra
+classifier call on every request.
 
 Letting callers pick the model themselves. Callers will pick the expensive one, which
 defeats the purpose.

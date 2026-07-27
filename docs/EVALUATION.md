@@ -3,7 +3,7 @@
 Semantic similarity is probabilistic. A unit test can prove tenant isolation and Redis
 mechanics, but it cannot prove that `0.95` is a safe threshold for real language.
 
-This project therefore separates two questions:
+The tests and evaluator answer different questions:
 
 1. **Does the cache enforce its rules?** Deterministic integration tests answer this in
    CI.
@@ -18,8 +18,8 @@ This project therefore separates two questions:
 - 20 related but meaningfully different questions that should miss;
 - examples routed through both the cheap and powerful model tiers.
 
-Hard negatives differ by details such as country, operation or delivery guarantee. They
-are deliberately more useful than random unrelated prompts.
+Hard negatives differ by details such as country, operation or delivery guarantee.
+Random unrelated prompts would make the threshold look safer than it is.
 
 The corpus is small and English-only. Results describe this corpus, not all production
 traffic.
@@ -60,10 +60,12 @@ go run ./cmd/cache-eval \
 
 ## Metrics
 
-- **Precision:** of all cache hits, how many were genuinely equivalent?
-- **Recall:** of all equivalent pairs, how many were found?
-- **Cache hit rate:** how often the lookup avoided a completion in this simulation.
-- **p50/p95 latency:** median and tail lookup time, including the embedding request.
+| Metric | Meaning |
+|---|---|
+| Precision | Of all cache hits, how many were genuinely equivalent? |
+| Recall | Of all equivalent pairs, how many were found? |
+| Cache hit rate | How often did the lookup avoid a completion in this simulation? |
+| p50/p95 latency | Median and tail lookup time, including the embedding request |
 
 The command exits non-zero when precision is below 95%, after writing the result files.
 Recall is reported rather than used as a hard gate: a false miss costs performance, but
@@ -71,13 +73,14 @@ a false hit gives the user the wrong answer.
 
 ## Publishing results
 
-No benchmark number is committed yet because the evaluation has not been run in a
-controlled environment. When publishing:
+No benchmark number is committed because the evaluation has not run in a controlled
+environment. Before publishing a result:
 
 1. keep the corpus version, embedding model and raw JSON result together;
 2. record machine, region and Redis setup;
 3. publish failed targets as well as successful ones;
-4. tune the threshold without changing labels to flatter the result;
-5. do not describe this small corpus as production traffic.
+4. keep the labels fixed, and use a separate validation set if tuning the threshold;
+5. describe the result as a measurement of this corpus, not production traffic.
 
-This makes a missing result honest and a future result reproducible.
+Until those conditions are met, leaving the result unpublished is more accurate than
+quoting an unrepeatable score.

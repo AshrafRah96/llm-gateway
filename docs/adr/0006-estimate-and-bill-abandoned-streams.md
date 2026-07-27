@@ -25,9 +25,8 @@ plus whatever it generated before the connection dropped.
 
 ## Decision
 
-When no usage chunk arrives, estimate. The inputs are good: the prompt is known exactly,
-and the partial answer is exactly what was received before the cut. Roughly four bytes
-per token, in `estimateTokens`.
+When no usage chunk arrives, estimate from the exact prompt and the partial answer
+received before cancellation. `estimateTokens` uses roughly four bytes per token.
 
 Record the charge, and mark it:
 
@@ -44,17 +43,15 @@ settlement path with a bounded context detached from the cancelled request.
 
 Abandoned streams appear in billing instead of vanishing.
 
-Actual spend does not change. Cancelling still drops the upstream connection, so OpenAI
-still stops generating. The money saved by cancelling is unaffected. Only the record
-improves.
+Cancelling still drops the upstream connection, so OpenAI stops generating as before.
+The change affects the usage record, not provider spend.
 
 The number is approximate. Four bytes per token is a rule of thumb for English and reads
 low for CJK. It has never been reconciled against a real OpenAI invoice, which is the
 main open risk with this decision.
 
-Marking the estimate is as important as making it. Silently substituting a guess for a
-measurement is its own kind of hiding, and a customer disputing a bill deserves an answer
-better than a number of unknown provenance.
+Every estimate must remain visible. A customer disputing a charge needs to know whether
+the provider reported the number or the gateway inferred it.
 
 Truncated streams are still not cached. An estimate is good enough to bill, not good
 enough to serve to somebody else.

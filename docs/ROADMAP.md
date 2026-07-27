@@ -1,7 +1,7 @@
 # Roadmap
 
-The project is intentionally small. This list prioritises risks rather than feature
-count.
+The project is intentionally small. This roadmap orders work by risk, not by the number
+of features it would add.
 
 ## Next: bound cost and work
 
@@ -11,8 +11,8 @@ count.
 - Add per-tenant token and spend budgets.
 - Load-test cancellation, quotas and graceful shutdown.
 
-This is the next slice because one accepted request can currently consume unbounded time
-and provider spend.
+This comes first because one accepted request can currently consume unbounded time and
+provider spend.
 
 ## Then: make identity and money auditable
 
@@ -30,7 +30,7 @@ and provider spend.
 - Add readiness checks for Redis Search and the provider path.
 - Add metrics, traces, correlation IDs and actionable alerts.
 
-## Then: modernise provider policy
+## Then: move provider policy into configuration
 
 - Move model IDs, prices, routing rules and output limits to validated configuration.
 - Add bounded retries only for documented transient failures, respecting deadlines and

@@ -1,11 +1,10 @@
 # Engineering notes
 
-Two bugs in this codebase were worth writing down. Both were silent, both involved money,
-and neither showed up as a failing test, because in each case the tests had been written
-to match the implementation rather than to check it.
+Two silent bugs in this codebase affected money without failing a test. In both cases,
+the tests copied the implementation closely enough to copy its mistake.
 
-They are here because the interesting part of a project like this is not the feature
-list. It is what happened when something did not work.
+These notes cover how the bugs behaved, how they escaped the suite and what now catches
+them.
 
 ---
 
@@ -158,9 +157,8 @@ I had already found this bug and then talked myself out of it, by calling it rar
 summary and moving on. The word "interrupted" made it sound like a network fault instead
 of a user clicking a button.
 
-Also: a caveat written down is not a caveat handled. Naming a limitation feels like
-diligence and can be a way of filing something under "known" so you never look at it
-again.
+A written caveat is still an unfixed caveat. Calling something "known" can feel like
+progress even when nobody has dealt with it.
 
 ---
 
