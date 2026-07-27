@@ -26,14 +26,12 @@ type Config struct {
 	OpenAIAPIKey string
 	RedisAddr    string
 	CacheTTL     time.Duration
-	ListenAddr   string
 }
 
 func LoadConfig(getenv func(string) string) (Config, error) {
 	cfg := Config{
 		OpenAIAPIKey: getenv("OPENAI_API_KEY"),
 		RedisAddr:    getenv("REDIS_ADDR"),
-		ListenAddr:   defaultListenAddr,
 	}
 	if cfg.OpenAIAPIKey == "" {
 		return Config{}, fmt.Errorf("OPENAI_API_KEY not set")
@@ -98,7 +96,7 @@ func New(ctx context.Context, cfg Config) (*Application, error) {
 
 	return &Application{
 		Server: &http.Server{
-			Addr:    cfg.ListenAddr,
+			Addr:    defaultListenAddr,
 			Handler: httpHandler,
 		},
 		redis: redisClient,
@@ -106,9 +104,6 @@ func New(ctx context.Context, cfg Config) (*Application, error) {
 }
 
 func (a *Application) Close() error {
-	if a == nil || a.redis == nil {
-		return nil
-	}
 	return a.redis.Close()
 }
 
@@ -120,8 +115,6 @@ func validateConfig(cfg Config) error {
 		return fmt.Errorf("Redis address is required")
 	case cfg.CacheTTL <= 0:
 		return fmt.Errorf("cache TTL must be greater than zero")
-	case cfg.ListenAddr == "":
-		return fmt.Errorf("listen address is required")
 	default:
 		return nil
 	}

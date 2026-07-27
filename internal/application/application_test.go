@@ -21,7 +21,6 @@ func TestLoadConfig(t *testing.T) {
 				OpenAIAPIKey: "sk-test",
 				RedisAddr:    "localhost:6379",
 				CacheTTL:     24 * time.Hour,
-				ListenAddr:   ":8080",
 			},
 		},
 		{
@@ -35,7 +34,6 @@ func TestLoadConfig(t *testing.T) {
 				OpenAIAPIKey: "sk-test",
 				RedisAddr:    "redis:6380",
 				CacheTTL:     90 * time.Minute,
-				ListenAddr:   ":8080",
 			},
 		},
 		{
@@ -79,7 +77,6 @@ func TestNewRejectsInvalidConfigurationBeforeDialingRedis(t *testing.T) {
 		OpenAIAPIKey: "sk-test",
 		RedisAddr:    "127.0.0.1:0",
 		CacheTTL:     time.Hour,
-		ListenAddr:   ":8080",
 	}
 	tests := []struct {
 		name    string
@@ -100,11 +97,6 @@ func TestNewRejectsInvalidConfigurationBeforeDialingRedis(t *testing.T) {
 			name:    "non-positive cache TTL",
 			mutate:  func(c *Config) { c.CacheTTL = 0 },
 			wantErr: "cache TTL must be greater than zero",
-		},
-		{
-			name:    "missing listen address",
-			mutate:  func(c *Config) { c.ListenAddr = "" },
-			wantErr: "listen address is required",
 		},
 	}
 
