@@ -71,7 +71,12 @@ func TestSemanticCacheEquivalentPromptHitsWithinNamespace(t *testing.T) {
 		t.Fatalf("Get: %v", err)
 	}
 	if got == nil || string(got.Response) != `{"answer":"Paris"}` {
-		t.Fatalf("Get = %+v, want the cached Paris response", got)
+		all, searchErr := client.Do(context.Background(),
+			"FT.SEARCH", indexName, "*",
+			"RETURN", "4", "tenant", "model", "version", "data",
+		).Result()
+		t.Fatalf("Get = %+v, want the cached Paris response; unfiltered search = %#v, err = %v",
+			got, all, searchErr)
 	}
 }
 
