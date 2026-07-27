@@ -46,7 +46,6 @@ type semanticAttempt struct {
 }
 
 type CacheEntry struct {
-	Prompt   string `json:"prompt"`
 	Response []byte `json:"response"`
 	Status   int    `json:"status"`
 }
@@ -156,7 +155,6 @@ func (a *semanticAttempt) Get(ctx context.Context) (*CacheEntry, error) {
 
 func (a *semanticAttempt) Set(ctx context.Context, response []byte, status int) error {
 	entry := CacheEntry{
-		Prompt:   a.prompt,
 		Response: response,
 		Status:   status,
 	}

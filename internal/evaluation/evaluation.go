@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
@@ -236,8 +235,4 @@ func percentile(sorted []float64, p float64) float64 {
 	}
 	index := int(float64(len(sorted)-1)*p + 0.5)
 	return sorted[index]
-}
-
-func ParseTier(value string) Tier {
-	return Tier(strings.ToLower(value))
 }
