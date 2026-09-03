@@ -16,10 +16,21 @@ type Namespace struct {
 }
 
 func NewNamespace(apiKey, model string) Namespace {
-	sum := sha256.Sum256([]byte(apiKey))
+	return NewProjectNamespace(apiKey, model, "")
+}
+
+// NewProjectNamespace scopes reusable responses to an authenticated project rather
+// than a raw client key. corpusVersion changes whenever that project's RAG corpus
+// changes, so answers produced from removed or replaced context are never replayed.
+func NewProjectNamespace(projectID, model, corpusVersion string) Namespace {
+	sum := sha256.Sum256([]byte(projectID))
+	version := SchemaVersion
+	if corpusVersion != "" {
+		version += ":" + corpusVersion
+	}
 	return Namespace{
 		Tenant:  hex.EncodeToString(sum[:]),
 		Model:   model,
-		Version: SchemaVersion,
+		Version: version,
 	}
 }

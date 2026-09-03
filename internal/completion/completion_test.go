@@ -289,3 +289,49 @@ func TestComplete_RoutesOnPrompt(t *testing.T) {
 		}
 	}
 }
+
+type sequencedProvider struct {
+	results []struct {
+		body   []byte
+		status int
+		err    error
+	}
+	models []router.Model
+}
+
+func (p *sequencedProvider) Complete(ctx context.Context, prompt string, m router.Model) ([]byte, int, error) {
+	p.models = append(p.models, m)
+	result := p.results[0]
+	p.results = p.results[1:]
+	return result.body, result.status, result.err
+}
+
+func (p *sequencedProvider) Stream(context.Context, string, router.Model) (ProviderStream, int, error) {
+	return nil, 0, errors.New("not used")
+}
+
+func TestComplete_FailsOverOnceBeforeReturningOutput(t *testing.T) {
+	fallback := router.Model{ID: "cheap-fallback", PriceIn: 0.001, PriceOut: 0.002}
+	p := &sequencedProvider{results: []struct {
+		body   []byte
+		status int
+		err    error
+	}{
+		{status: http.StatusServiceUnavailable, body: []byte(`{"error":"busy"}`)},
+		{status: http.StatusOK, body: []byte(okBody)},
+	}}
+	r := router.Default()
+	r.CheapFallback = fallback
+	c := NewWithRouting(p, &fakeCache{}, &fakeRecorder{}, r, nil)
+
+	got, err := c.Complete(context.Background(), Request{Prompt: "hello"})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(p.models) != 2 || p.models[0].ID != router.Cheap.ID || p.models[1] != fallback {
+		t.Fatalf("models = %+v, want primary then fallback", p.models)
+	}
+	if !got.Fallback || got.Model != fallback.ID || got.Status != http.StatusOK {
+		t.Fatalf("response = %+v", got)
+	}
+}

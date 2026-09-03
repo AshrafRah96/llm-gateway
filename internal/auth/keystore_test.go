@@ -83,3 +83,36 @@ func TestKeyStore_ValidWithNoKeysConfigured(t *testing.T) {
 		t.Error("an empty key set must not authorise anything")
 	}
 }
+
+func TestKeyStore_StoresOnlyFingerprintAndReturnsProjectPrincipal(t *testing.T) {
+	client, err := dial()
+	if err != nil {
+		t.Skip(err)
+	}
+	store := NewKeyStore(client, "pepper")
+	ctx := context.Background()
+	raw := "project-secret-key"
+	key := projectKeyPrefix + store.Fingerprint(raw)
+	client.Del(ctx, key)
+	t.Cleanup(func() { client.Del(ctx, key) })
+
+	if err := store.Provision(ctx, "project-a", raw); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	data, err := client.HGetAll(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("HGetAll: %v", err)
+	}
+	for _, value := range data {
+		if value == raw {
+			t.Fatal("raw API key was stored in Redis")
+		}
+	}
+	principal, ok, err := store.Lookup(ctx, raw)
+	if err != nil || !ok {
+		t.Fatalf("Lookup = %+v, %v, %v", principal, ok, err)
+	}
+	if principal.ProjectID != "project-a" || principal.KeyID == raw {
+		t.Fatalf("principal = %+v", principal)
+	}
+}

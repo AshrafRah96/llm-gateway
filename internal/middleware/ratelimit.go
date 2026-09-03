@@ -13,6 +13,9 @@ func RateLimit(limiter *ratelimit.Limiter) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			apiKey := r.Header.Get("X-API-Key")
+			if principal, ok := PrincipalFromContext(r.Context()); ok {
+				apiKey = principal.KeyID
+			}
 
 			allowed, retryAfter, err := limiter.Allow(r.Context(), apiKey)
 			if err != nil {

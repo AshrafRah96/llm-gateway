@@ -58,6 +58,20 @@ func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Cache", "MISS")
 		w.Header().Set("X-Model", stream.Model())
 	}
+	if stream.RAGEnabled() && stream.Grounded() {
+		w.Header().Set("X-RAG-Grounded", "true")
+		data, err := json.Marshal(gatewayMetadata{Grounded: true, Sources: stream.Sources()})
+		if err != nil {
+			return
+		}
+		w.Write(append(append([]byte("event: sources\ndata: "), data...), '\n', '\n'))
+		flusher.Flush()
+	} else if stream.RAGEnabled() {
+		w.Header().Set("X-RAG-Grounded", "false")
+	}
+	if stream.Fallback() {
+		w.Header().Set("X-Model-Fallback", "true")
+	}
 
 	for chunk, ok := stream.Next(); ok; chunk, ok = stream.Next() {
 		data := []byte("[DONE]")
