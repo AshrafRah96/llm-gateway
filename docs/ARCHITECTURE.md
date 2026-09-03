@@ -1,118 +1,91 @@
 # Architecture
 
-This gateway sits between an application and OpenAI. Its purpose is to keep policy,
-cost control and reusable infrastructure out of every calling application.
-
-It is a production-minded reference implementation, not a complete production service.
-The [threat model](THREAT-MODEL.md) separates implemented controls from open risks.
+This gateway sits between an application and OpenAI. It centralises model policy,
+project-scoped retrieval, semantic reuse, quotas and usage tracking while remaining a
+focused reference implementation rather than a complete production service.
 
 ## Request flow
 
 ```text
-HTTP client
-   │ X-API-Key
-   ▼
-authentication ── invalid ──▶ 401
-   ▼
-atomic sliding-window limit ── full ──▶ 429
-   ▼
-route the prompt to a model
-   ▼
-tenant + model + schema filtered vector lookup
-   ├─ hit ────────────────────────────▶ cached response
-   ▼ miss
-OpenAI completion or SSE stream
-   ▼
-meter usage → cache complete successes → respond
+HTTP client (X-API-Key)
+  |
+  v
+HMAC project authentication -- invalid --> 401
+  |
+  v
+rate limit + global/project concurrency caps -- full --> 429 / 503
+  |
+  v
+project-filtered vector retrieval
+  |                         \
+  |                          \-- no match: continue ungrounded
+  v
+deterministic primary model route
+  |
+  v
+project + model + corpus-revision semantic response cache -- hit --> response
+  |
+  v
+OpenAI primary -- transient pre-output failure --> one configured fallback
+  |
+  v
+completion or SSE stream --> meter --> cache complete success --> respond
 ```
 
-Routing happens before cache lookup. The routed model is part of the cache namespace,
-so an answer produced for one model cannot silently stand in for another.
+Retrieved documents are untrusted reference data, not executable instructions. The
+gateway does not expose tools or downstream actions to the model. A retrieval miss still
+calls the model but marks the response as ungrounded; a successful retrieval returns
+bounded source metadata.
 
 ## Modules and seams
 
-| Module | Interface seen by callers | Complexity hidden behind it |
-|---|---|---|
-| `application` | Load configuration or build the application | Validation, concrete adapter graph, Redis ownership and HTTP server |
-| `completion` | Complete or stream one request | Routing, caching, provider calls, metering and logging |
-| `cache` | Begin one attempt within a namespace | One reusable embedding, Redis Search, similarity policy, TTL and schema versioning |
-| `ratelimit` | Allow and status | Sliding-window state and atomic Redis Lua execution |
-| `provider` | Complete or stream semantic events | OpenAI HTTP, SSE scanning and response decoding |
-| `handler` | HTTP routes | Request JSON, stable response SSE and headers |
-
-`completion` is the central module. Both `/chat` and `/chat/stream` cross the same seam
-so their caching and billing behavior cannot drift apart. The streaming implementation
-accumulates provider-neutral content and usage events while applying cache and billing
-policy. OpenAI framing stays inside the provider adapter; outbound SSE framing stays
-inside the HTTP handler.
-
-A private request lifecycle owns routing, namespace construction, the cache attempt,
-metering, logging and store eligibility for both delivery modes. A normal stream settles
-that lifecycle when its provider ends. `Close` crosses the same idempotent settlement
-path only as the fallback for an abandoned stream.
-
-The cache and rate limiter each have real adapter seams. Production uses Redis and
-OpenAI; tests use deterministic adapters without external calls.
-
-## Startup and shutdown
-
-`internal/application` parses the three environment settings, validates configuration,
-constructs the concrete adapter graph and returns the HTTP server. Redis uses RESP2,
-connectivity is checked before serving, and semantic-cache index creation receives the
-same bounded startup context. The application owns and closes the Redis client.
-
-`main` owns only process lifecycle: a ten-second startup budget, signal handling,
-listening, a thirty-second graceful shutdown budget and application cleanup. Startup
-errors return through the application interface before `main` decides to exit.
-
-## Semantic-cache namespace
-
-Every cache operation carries:
-
-- `tenant`: SHA-256 of the caller's API key;
-- `model`: the model selected by the router;
-- `version`: the cache schema version.
-
-Redis Search applies these as hard filters before ranking vectors. Semantic similarity
-can select only within that namespace. Redis keys contain hashes rather than raw keys or
-prompts, and entries expire after `CACHE_TTL` (`24h` by default).
-
-A request begins one cache attempt. The attempt embeds and validates the prompt once,
-then retains the encoded vector for both lookup and a later store. A cacheable miss
-therefore does not pay for a second embedding call.
-
-Schema v2 uses the `cache:v2:` prefix and `prompt_cache_v2` index. Old unscoped entries
-remain unreadable and can be removed separately; there is no unsafe migration path.
-
-## Failure behavior
-
-| Failure | Behavior |
+| Module | Responsibility |
 |---|---|
-| Invalid key | Return 401 without calling OpenAI |
-| Local quota full | Return 429 with `Retry-After` |
-| Cache embedding/search/write fails | Log it and continue as a cache miss |
-| OpenAI transport fails | Return 502 |
-| OpenAI returns a status | Preserve the status where the completion interface exposes it |
-| Client abandons a stream | Cancel OpenAI, estimate received usage, label the estimate, never cache the partial answer |
-| Usage storage fails | Log it; the response is still returned |
+| `application` | Validates configuration, owns Redis, and composes the HTTP server. |
+| `auth` | Looks up HMAC-fingerprinted project keys and returns a non-secret principal. |
+| `rag` | Validates, chunks, embeds and retrieves operator-reviewed project documents. |
+| `completion` | Coordinates retrieval, routing, cache, provider calls, metering and streaming. |
+| `cache` | Performs semantic response caching within a project/model/corpus namespace. |
+| `ratelimit` | Makes distributed sliding-window decisions in Redis. |
+| `provider` | Translates OpenAI HTTP and SSE wire formats into provider-neutral events. |
+| `handler` | Decodes HTTP requests and emits JSON or stable SSE responses. |
 
-Cache failure is fail-open because the cache is an optimization. Authentication and
-rate limiting fail closed because they are controls. Best-effort usage storage is an
-explicit limitation tracked in the [roadmap](ROADMAP.md).
+Both `/chat` and `/chat/stream` use the same completion lifecycle. Normal stream
+exhaustion settles cache, usage and logs; `Close` is an idempotent fallback for client
+abandonment.
 
-## Why Redis
+## Project identity, RAG and cache isolation
 
-One Redis deployment currently holds API keys, quotas, usage totals and vector entries.
-Redis sorted sets plus Lua make the rate-limit decision atomic across gateway instances.
-Redis Search supports vector ranking with tenant/model metadata filters.
+Authentication derives a project principal from an HMAC fingerprint of the caller key.
+Raw keys do not enter completion, rate-limit, usage or cache state.
 
-This is economical for a portfolio project but couples data with different durability
-needs. A production design should separate disposable cache data from auditable billing
-records.
+RAG stores each chunk with a project fingerprint and filters that field before Redis
+Search ranks vectors. Each response-cache namespace contains:
+
+- `tenant`: SHA-256 of the authenticated project ID;
+- `model`: the deterministic route's selected model;
+- `version`: the cache schema and current project corpus revision.
+
+Changing a project's documents advances its corpus revision, so a response generated
+from prior context cannot be replayed. Cache operations retain one prompt embedding for
+both lookup and store; cache failures are logged and treated as misses.
+
+## Resource and failure policy
+
+Requests have bounded bodies, prompts, deadlines, output-token caps, and global and
+per-project concurrency limits before they reach an embedding or completion provider.
+Authentication and limits fail closed. Cache and retrieval failures fail open as
+ungrounded completion requests because they are optimisations, not authorization rules.
+
+The configured fallback is attempted once only for a transient transport failure or an
+HTTP 408, 429, or 5xx before any output is delivered. A stream is never replayed after
+it emits content. Complete successful responses may be cached; partial streams are
+metered with a labelled token estimate and are never cached.
 
 ## Further reading
 
-- [Decision records](adr/README.md)
-- [Engineering notes](ENGINEERING-NOTES.md)
+- [Project-scoped RAG](RAG.md)
 - [Threat model](THREAT-MODEL.md)
+- [Roadmap](ROADMAP.md)
+- [Decision records](adr/README.md)
 - [Evaluation method](EVALUATION.md)

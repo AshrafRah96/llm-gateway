@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/ashrafrah96/llm-gateway/internal/middleware"
 	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
@@ -19,6 +20,9 @@ func usageHandler(tracker StatsReader) http.HandlerFunc {
 		if apiKey == "" {
 			http.Error(w, "missing X-API-Key", http.StatusUnauthorized)
 			return
+		}
+		if principal, ok := middleware.PrincipalFromContext(r.Context()); ok {
+			apiKey = principal.ProjectID
 		}
 
 		stats, err := tracker.Get(r.Context(), apiKey)

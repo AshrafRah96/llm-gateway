@@ -23,6 +23,9 @@ const (
 	DefaultTTL          = 24 * time.Hour
 )
 
+// EmbeddingDimension is shared by the semantic response cache and project RAG index.
+const EmbeddingDimension = vectorDim
+
 type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }

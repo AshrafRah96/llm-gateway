@@ -50,6 +50,7 @@ type Stream struct {
 
 	cacheHit bool
 	replay   []StreamChunk
+	failover bool
 
 	content   strings.Builder
 	tokensIn  int
@@ -76,7 +77,17 @@ func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 		// An entry we cannot read is a miss, not a failure.
 	}
 
-	body, status, err := c.provider.Stream(ctx, req.Prompt, l.model)
+	body, status, err := c.provider.Stream(ctx, l.req.Prompt, l.model)
+	if shouldFailover(err, status) && l.fallback.ID != "" && l.fallback.ID != l.model.ID {
+		if body != nil {
+			_ = body.Close()
+		}
+		s.failover = true
+		body, status, err = c.provider.Stream(ctx, l.req.Prompt, l.fallback)
+		if err == nil && status == http.StatusOK {
+			l.model = l.fallback
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +100,12 @@ func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 	return s, nil
 }
 
-func (s *Stream) Model() string  { return s.lifecycle.model.ID }
-func (s *Stream) CacheHit() bool { return s.cacheHit }
+func (s *Stream) Model() string     { return s.lifecycle.model.ID }
+func (s *Stream) CacheHit() bool    { return s.cacheHit }
+func (s *Stream) Grounded() bool    { return s.lifecycle.grounded }
+func (s *Stream) Sources() []Source { return s.lifecycle.sources }
+func (s *Stream) Fallback() bool    { return s.failover }
+func (s *Stream) RAGEnabled() bool  { return s.lifecycle.ragEnabled }
 
 func (s *Stream) Next() (StreamChunk, bool) {
 	if s.done {
@@ -182,7 +197,7 @@ func (s *Stream) settle() error {
 	defer cancel()
 
 	s.lifecycle.meter(ctx, usage.Entry{
-		APIKey:    s.lifecycle.req.APIKey,
+		APIKey:    s.lifecycle.identity(),
 		TokensIn:  s.tokensIn,
 		TokensOut: s.tokensOut,
 		CostUSD:   s.lifecycle.model.Cost(s.tokensIn, s.tokensOut),
