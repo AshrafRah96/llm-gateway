@@ -5,6 +5,9 @@
 An OpenAI gateway project about the engineering around an LLM call:
 distributed quotas, semantic reuse, streaming cancellation and auditable cost tracking.
 
+It also includes a deliberately scoped, [project-isolated RAG flow](docs/RAG.md):
+operator-reviewed Markdown/text is retrieved only for the authenticated project's key.
+
 Your app sends a prompt here instead of to OpenAI. The gateway checks the caller's
 API key, makes sure they aren't sending too many requests, looks for a cached answer,
 picks a model, calls OpenAI, and records what it cost.
@@ -27,18 +30,31 @@ The cache-quality claims are measurable rather than assumed. The repository incl
 precision, recall, hit rate and lookup latency. No result is published until that
 command has run; see [evaluation](docs/EVALUATION.md).
 
-```text
-client → auth → sliding-window limit → route model
-                                      ↓
-                            tenant-safe semantic cache
-                                      │ miss
-                                      ▼
-                                    OpenAI
-                                      ↓
-                           meter + cache + respond
-```
-
 **Stack:** Go, Redis/Redis Search, Lua, Server-Sent Events, Docker and GitHub Actions.
+
+### Current request flow
+
+```text
+client (X-API-Key)
+  |
+  v
+HMAC project authentication -- invalid --> 401
+  |
+  v
+rate limit + global/project concurrency caps -- full --> 429 / 503
+  |
+  v
+project-filtered RAG retrieval -- no match --> ungrounded request
+  |
+  v
+deterministic route: primary model, one same-provider fallback
+  |
+  v
+project + model + corpus-revision semantic cache -- hit --> response
+  |
+  v
+OpenAI completion / stream --> usage + cache complete success --> response
+```
 
 ## What it does
 
@@ -179,15 +195,18 @@ Use the redis-stack image rather than plain Redis. The cache needs vector search
 commands that only the stack has, and the gateway will not start without them.
 Everything else works on plain Redis.
 
-### Adding an API key
+### Provisioning a project key
 
-Keys live in a Redis set called `api_keys`. There is no admin endpoint — add them
-directly:
+Set a stable deployment secret, then generate a key bound to one project. Redis stores
+only its HMAC fingerprint; the command prints the raw key once.
 
 ```bash
-redis-cli SADD api_keys some-secret-key
-redis-cli SREM api_keys some-secret-key   # to revoke
+export API_KEY_PEPPER='a-long-random-secret'
+go run ./cmd/project-key -project demo
 ```
+
+Import reviewed project documents with `go run ./cmd/rag-import -project demo -file
+docs/example.md`. See [RAG](docs/RAG.md) for the complete workflow and isolation model.
 
 ### Docker
 
@@ -195,6 +214,7 @@ redis-cli SREM api_keys some-secret-key   # to revoke
 docker build -t llm-gateway .
 docker run -p 8080:8080 \
   -e OPENAI_API_KEY=sk-your-key \
+  -e API_KEY_PEPPER=a-long-random-secret \
   -e REDIS_ADDR=host.docker.internal:6379 \
   llm-gateway
 ```
@@ -206,6 +226,11 @@ docker run -p 8080:8080 \
 | `OPENAI_API_KEY` | Your OpenAI key (needed) | —                |
 | `REDIS_ADDR`     | Where Redis is           | `localhost:6379` |
 | `CACHE_TTL`      | How long answers remain reusable | `24h` |
+| `API_KEY_PEPPER` | Secret used to fingerprint project keys (required) | â€” |
+| `REQUEST_TIMEOUT` | Gateway request deadline | `60s` |
+| `MAX_REQUEST_BODY_BYTES` | Maximum JSON request body | `65536` |
+| `MAX_CONCURRENT_REQUESTS` | Global in-flight request cap | `16` |
+| `MAX_CONCURRENT_PER_PROJECT` | Per-project in-flight cap | `4` |
 
 `internal/application` validates these values before constructing the adapter graph.
 Redis connectivity and semantic-cache index creation share a bounded startup context,

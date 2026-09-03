@@ -5,19 +5,19 @@ count.
 
 ## Next: bound cost and work
 
-- Limit HTTP body and prompt size.
-- Add endpoint-aware request deadlines and bounded upstream response reads.
-- Cap concurrent requests and output tokens.
+- ~~Limit HTTP body and prompt size.~~
+- ~~Add endpoint-aware request deadlines.~~ Bounded upstream response reads remain.
+- ~~Cap concurrent requests and output tokens.~~
 - Add per-tenant token and spend budgets.
 - Load-test cancellation, quotas and graceful shutdown.
 
-This is the next slice because one accepted request can currently consume unbounded time
-and provider spend.
+These controls bound individual requests; tenant token and spend budgets are the next
+meaningful cost-control gap.
 
 ## Then: make identity and money auditable
 
-- Replace plaintext client keys with keyed fingerprints and rotation metadata.
-- Stop placing raw client keys in rate-limit and usage key names.
+- ~~Replace plaintext client keys with keyed fingerprints.~~ Add rotation metadata.
+- ~~Stop placing raw client keys in rate-limit and usage key names.~~
 - Record money as integer minor units rather than `float64`.
 - Write idempotent usage events to durable storage and reconcile aggregates.
 - Separate disposable semantic-cache data from billing records.
@@ -32,9 +32,9 @@ and provider spend.
 
 ## Then: modernise provider policy
 
-- Move model IDs, prices, routing rules and output limits to validated configuration.
-- Add bounded retries only for documented transient failures, respecting deadlines and
-  `Retry-After`.
+- Finish moving model prices and output limits into validated configuration.
+- Measure the configured one-shot transient failover policy against real provider
+  behaviour and `Retry-After` responses.
 - Capture provider request IDs and use a stable error taxonomy.
 - Add an opt-in real-provider contract smoke test.
 

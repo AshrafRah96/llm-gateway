@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ashrafrah96/llm-gateway/internal/router"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -18,9 +20,14 @@ func TestLoadConfig(t *testing.T) {
 			name: "defaults",
 			env:  map[string]string{"OPENAI_API_KEY": "sk-test"},
 			want: Config{
-				OpenAIAPIKey: "sk-test",
-				RedisAddr:    "localhost:6379",
-				CacheTTL:     24 * time.Hour,
+				OpenAIAPIKey:            "sk-test",
+				RedisAddr:               "localhost:6379",
+				CacheTTL:                24 * time.Hour,
+				RequestTimeout:          60 * time.Second,
+				MaxRequestBodyBytes:     64 << 10,
+				MaxConcurrentRequests:   16,
+				MaxConcurrentPerProject: 4,
+				Router:                  router.Default(),
 			},
 		},
 		{
@@ -31,9 +38,14 @@ func TestLoadConfig(t *testing.T) {
 				"CACHE_TTL":      "90m",
 			},
 			want: Config{
-				OpenAIAPIKey: "sk-test",
-				RedisAddr:    "redis:6380",
-				CacheTTL:     90 * time.Minute,
+				OpenAIAPIKey:            "sk-test",
+				RedisAddr:               "redis:6380",
+				CacheTTL:                90 * time.Minute,
+				RequestTimeout:          60 * time.Second,
+				MaxRequestBodyBytes:     64 << 10,
+				MaxConcurrentRequests:   16,
+				MaxConcurrentPerProject: 4,
+				Router:                  router.Default(),
 			},
 		},
 		{
@@ -74,9 +86,15 @@ func TestLoadConfig(t *testing.T) {
 
 func TestNewRejectsInvalidConfigurationBeforeDialingRedis(t *testing.T) {
 	valid := Config{
-		OpenAIAPIKey: "sk-test",
-		RedisAddr:    "127.0.0.1:0",
-		CacheTTL:     time.Hour,
+		OpenAIAPIKey:            "sk-test",
+		RedisAddr:               "127.0.0.1:0",
+		CacheTTL:                time.Hour,
+		APIKeyPepper:            "test-pepper",
+		RequestTimeout:          time.Second,
+		MaxRequestBodyBytes:     1024,
+		MaxConcurrentRequests:   1,
+		MaxConcurrentPerProject: 1,
+		Router:                  router.Default(),
 	}
 	tests := []struct {
 		name    string

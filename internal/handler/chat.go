@@ -2,6 +2,8 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/ashrafrah96/llm-gateway/internal/completion"
@@ -12,6 +14,8 @@ import (
 type ChatRequest struct {
 	Prompt string `json:"prompt"`
 }
+
+const maxPromptBytes = 32 << 10
 
 // Handler is the HTTP adapter. Everything a chat request actually does lives in the
 // completion module; these handlers only decode, encode and set headers.
@@ -48,7 +52,14 @@ func health(w http.ResponseWriter, r *http.Request) {
 // chat request looks like.
 func decode(w http.ResponseWriter, r *http.Request) (completion.Request, bool) {
 	var body ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, fmt.Sprintf("request body exceeds %d byte limit", tooLarge.Limit), http.StatusRequestEntityTooLarge)
+			return completion.Request{}, false
+		}
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return completion.Request{}, false
 	}
@@ -56,11 +67,17 @@ func decode(w http.ResponseWriter, r *http.Request) (completion.Request, bool) {
 		http.Error(w, "prompt is required", http.StatusBadRequest)
 		return completion.Request{}, false
 	}
+	if len(body.Prompt) > maxPromptBytes {
+		http.Error(w, "prompt exceeds 32768 byte limit", http.StatusRequestEntityTooLarge)
+		return completion.Request{}, false
+	}
 
-	return completion.Request{
-		APIKey: r.Header.Get("X-API-Key"),
-		Prompt: body.Prompt,
-	}, true
+	req := completion.Request{APIKey: r.Header.Get("X-API-Key"), Prompt: body.Prompt}
+	if principal, ok := middleware.PrincipalFromContext(r.Context()); ok {
+		req.APIKey = ""
+		req.ProjectID = principal.ProjectID
+	}
+	return req, true
 }
 
 func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +99,41 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Cache", "MISS")
 		w.Header().Set("X-Model", resp.Model)
 	}
+	if resp.RAGEnabled && resp.Grounded {
+		w.Header().Set("X-RAG-Grounded", "true")
+	} else if resp.RAGEnabled {
+		w.Header().Set("X-RAG-Grounded", "false")
+	}
+	if resp.Fallback {
+		w.Header().Set("X-Model-Fallback", "true")
+	}
 	w.WriteHeader(resp.Status)
-	w.Write(resp.Body)
+	w.Write(withGatewayMetadata(resp))
+}
+
+type gatewayMetadata struct {
+	Grounded bool                `json:"grounded"`
+	Sources  []completion.Source `json:"sources,omitempty"`
+}
+
+// withGatewayMetadata is additive to OpenAI-shaped JSON. Legacy tests and malformed
+// upstream error bodies retain their original bytes rather than hiding provider errors.
+func withGatewayMetadata(resp completion.Response) []byte {
+	if !resp.RAGEnabled || resp.Status != http.StatusOK {
+		return resp.Body
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(resp.Body, &body); err != nil {
+		return resp.Body
+	}
+	meta, err := json.Marshal(gatewayMetadata{Grounded: resp.Grounded, Sources: resp.Sources})
+	if err != nil {
+		return resp.Body
+	}
+	body["gateway"] = meta
+	out, err := json.Marshal(body)
+	if err != nil {
+		return resp.Body
+	}
+	return out
 }
