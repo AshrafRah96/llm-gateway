@@ -17,17 +17,45 @@ var complexKeywords = []string{
 }
 
 func Route(prompt string) Model {
+	return Default().Route(prompt).Primary
+}
+
+// Router keeps deterministic routing policy configurable without making routing a
+// paid model call. Empty fallbacks mean "return the original upstream result".
+type Router struct {
+	Cheap            Model
+	Powerful         Model
+	CheapFallback    Model
+	PowerfulFallback Model
+}
+
+func Default() Router {
+	return Router{
+		Cheap:            Cheap,
+		Powerful:         Powerful,
+		CheapFallback:    Cheap,
+		PowerfulFallback: Powerful,
+	}
+}
+
+func (r Router) Route(prompt string) Decision {
+	if r.Cheap.ID == "" {
+		r.Cheap = Cheap
+	}
+	if r.Powerful.ID == "" {
+		r.Powerful = Powerful
+	}
 	lower := strings.ToLower(prompt)
 
 	if len(prompt) > 500 {
-		return Powerful
+		return Decision{Primary: r.Powerful, Fallback: r.PowerfulFallback}
 	}
 
 	for _, kw := range complexKeywords {
 		if strings.Contains(lower, kw) {
-			return Powerful
+			return Decision{Primary: r.Powerful, Fallback: r.PowerfulFallback}
 		}
 	}
 
-	return Cheap
+	return Decision{Primary: r.Cheap, Fallback: r.CheapFallback}
 }

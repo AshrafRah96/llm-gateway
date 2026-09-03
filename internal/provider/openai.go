@@ -30,6 +30,7 @@ type openAIRequest struct {
 	Messages      []openAIMessage `json:"messages"`
 	Stream        bool            `json:"stream,omitempty"`
 	StreamOptions *streamOptions  `json:"stream_options,omitempty"`
+	MaxTokens     int             `json:"max_tokens,omitempty"`
 }
 
 type OpenAIClient struct {
@@ -67,8 +68,9 @@ func NewOpenAIClient(apiKey string) *OpenAIClient {
 // Complete returns the full response body. Callers own nothing afterwards.
 func (c *OpenAIClient) Complete(ctx context.Context, prompt string, m router.Model) ([]byte, int, error) {
 	body, status, err := c.do(ctx, openAIRequest{
-		Model:    m.ID,
-		Messages: []openAIMessage{{Role: "user", Content: prompt}},
+		Model:     m.ID,
+		MaxTokens: m.MaxOutputTokens,
+		Messages:  []openAIMessage{{Role: "user", Content: prompt}},
 	})
 	if err != nil {
 		return nil, 0, err
@@ -88,6 +90,7 @@ func (c *OpenAIClient) Complete(ctx context.Context, prompt string, m router.Mod
 func (c *OpenAIClient) Stream(ctx context.Context, prompt string, m router.Model) (completion.ProviderStream, int, error) {
 	body, status, err := c.do(ctx, openAIRequest{
 		Model:         m.ID,
+		MaxTokens:     m.MaxOutputTokens,
 		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 		Messages:      []openAIMessage{{Role: "user", Content: prompt}},

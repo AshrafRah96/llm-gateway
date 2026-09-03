@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/ashrafrah96/llm-gateway/internal/middleware"
 	"github.com/ashrafrah96/llm-gateway/internal/ratelimit"
 )
 
@@ -19,6 +20,9 @@ func limitsHandler(limiter *ratelimit.Limiter) http.HandlerFunc {
 		if apiKey == "" {
 			http.Error(w, "missing X-API-Key", http.StatusUnauthorized)
 			return
+		}
+		if principal, ok := middleware.PrincipalFromContext(r.Context()); ok {
+			apiKey = principal.KeyID
 		}
 
 		count, limit, window, err := limiter.Status(r.Context(), apiKey)

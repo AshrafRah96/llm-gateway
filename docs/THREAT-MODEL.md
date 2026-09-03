@@ -30,10 +30,19 @@ client and limiting what one tenant can observe or spend.
 Vector similarity alone is not an authorization rule. Cache searches are therefore
 filtered by a SHA-256 tenant fingerprint, routed model and schema version before Redis
 ranks candidates. Entries also expire. Integration tests cover tenant and model
-isolation, expiry, malformed entries and legacy-key exclusion.
+isolation, expiry and malformed entries.
 
-The raw client key is not stored in semantic-cache keys or metadata. This is only cache
-hardening: the authentication set and usage keys still need stronger key handling.
+Raw client keys are also absent from the authentication store, rate-limit keys and usage
+keys: the gateway carries an HMAC fingerprint or project ID after authentication.
+
+### Project RAG isolation
+
+RAG chunks carry a project fingerprint, and every vector query filters on it before
+ranking. The project comes from the HMAC-fingerprinted API key rather than a request
+field. A corpus revision is part of the response-cache namespace, so a document change
+cannot serve an answer built from earlier context. Retrieved documents remain untrusted
+data: the gateway labels and delimits them, but cannot claim to eliminate prompt
+injection. See [RAG](RAG.md).
 
 ### Cost and availability
 
@@ -53,11 +62,11 @@ security guarantee.
 
 | Priority | Risk | Required production control |
 |---|---|---|
-| Critical | Unlimited body, prompt size, output, concurrency and spend | Request limits, token budgets, deadlines, concurrency caps and per-tenant spend ceilings |
-| Critical | Client keys are plaintext Redis set members and appear in other Redis key names | Keyed fingerprints, constant-time verification, rotation, expiry and scopes |
+| High | Spend ceilings and provider-response read limits remain incomplete | Per-tenant budgets and bounded provider readers |
+| High | Project key rotation, expiry and administrative scopes are not yet implemented | Rotation metadata, expiry and separate scoped administrator credentials |
 | High | Compose exposes Redis and RedisInsight without ACL or TLS | Private networking, Redis ACL, TLS, secrets management and removal of public ports |
 | High | Usage accounting is best effort and uses floating-point money | Durable idempotent events, integer minor units and reconciliation |
-| High | Provider calls have no bounded retry policy or request-ID tracing | Deadline-aware retries with jitter, error taxonomy and correlation IDs |
+| High | Failover has no provider request-ID tracing or observability pipeline | Correlation IDs, metrics and actionable alerts |
 | Medium | Similarity can return the wrong answer inside one tenant | Evaluated threshold, domain metadata, invalidation and monitoring |
 | Medium | Hard-coded models and prices can become stale | Validated configuration and controlled catalogue updates |
 

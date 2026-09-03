@@ -3,11 +3,24 @@ package middleware
 import (
 	"context"
 	"net/http"
+
+	"github.com/ashrafrah96/llm-gateway/internal/auth"
 )
 
 // KeyValidator is satisfied by *auth.KeyStore in production and by a fake in tests.
 type KeyValidator interface {
 	Valid(ctx context.Context, apiKey string) (bool, error)
+}
+
+type projectKeyValidator interface {
+	Lookup(ctx context.Context, apiKey string) (auth.Principal, bool, error)
+}
+
+type principalContextKey struct{}
+
+func PrincipalFromContext(ctx context.Context) (auth.Principal, bool) {
+	principal, ok := ctx.Value(principalContextKey{}).(auth.Principal)
+	return principal, ok
 }
 
 func Auth(store KeyValidator) Middleware {
@@ -16,6 +29,20 @@ func Auth(store KeyValidator) Middleware {
 			apiKey := r.Header.Get("X-API-Key")
 			if apiKey == "" {
 				http.Error(w, "missing X-API-Key", http.StatusUnauthorized)
+				return
+			}
+
+			if projects, ok := store.(projectKeyValidator); ok {
+				principal, valid, err := projects.Lookup(r.Context(), apiKey)
+				if err != nil {
+					http.Error(w, "auth error", http.StatusInternalServerError)
+					return
+				}
+				if !valid {
+					http.Error(w, "invalid API key", http.StatusUnauthorized)
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, principal)))
 				return
 			}
 

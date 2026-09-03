@@ -4,6 +4,7 @@ package completion
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -54,48 +55,106 @@ func (e *UpstreamError) Error() string {
 }
 
 type Request struct {
-	APIKey string
-	Prompt string
+	// APIKey is retained for the legacy in-process seam. Production handlers pass a
+	// fingerprinted ProjectID and never forward the raw caller key past auth.
+	APIKey    string
+	ProjectID string
+	Prompt    string
+}
+
+// Source is evidence selected by the project retriever. Excerpts are deliberately
+// bounded by the retriever so response metadata cannot become a second large payload.
+type Source struct {
+	DocumentID string `json:"document_id"`
+	ChunkID    string `json:"chunk_id"`
+	Excerpt    string `json:"excerpt"`
+}
+
+type Retrieval struct {
+	Prompt        string
+	CorpusVersion string
+	Sources       []Source
+}
+
+// Retriever is intentionally narrow: it supplies untrusted project context, never
+// tools or actions. A failed lookup is fail-open as an ungrounded chat response.
+type Retriever interface {
+	Retrieve(ctx context.Context, projectID, prompt string) (Retrieval, error)
 }
 
 type Response struct {
-	Body     []byte
-	Status   int
-	Model    string
-	CacheHit bool
+	Body       []byte
+	Status     int
+	Model      string
+	CacheHit   bool
+	Grounded   bool
+	Sources    []Source
+	Fallback   bool
+	RAGEnabled bool
 }
 
 type Completion struct {
-	provider Provider
-	cache    Cache
-	usage    Recorder
+	provider  Provider
+	cache     Cache
+	usage     Recorder
+	router    router.Router
+	retriever Retriever
 }
 
 // lifecycle concentrates the policy shared by buffered and streaming delivery.
 type lifecycle struct {
-	completion *Completion
-	ctx        context.Context
-	req        Request
-	model      router.Model
-	attempt    cache.Attempt
-	started    time.Time
+	completion   *Completion
+	ctx          context.Context
+	req          Request
+	model        router.Model
+	fallback     router.Model
+	failover     bool
+	grounded     bool
+	ragEnabled   bool
+	sources      []Source
+	cacheVersion string
+	attempt      cache.Attempt
+	started      time.Time
 }
 
 func New(provider Provider, cache Cache, usage Recorder) *Completion {
-	return &Completion{provider: provider, cache: cache, usage: usage}
+	return NewWithRouting(provider, cache, usage, router.Default(), nil)
+}
+
+func NewWithRouting(provider Provider, cache Cache, usage Recorder, r router.Router, retriever Retriever) *Completion {
+	return &Completion{provider: provider, cache: cache, usage: usage, router: r, retriever: retriever}
 }
 
 func (c *Completion) begin(ctx context.Context, req Request) *lifecycle {
-	model := router.Route(req.Prompt)
+	decision := c.router.Route(req.Prompt)
 	l := &lifecycle{
 		completion: c,
 		ctx:        ctx,
 		req:        req,
-		model:      model,
+		model:      decision.Primary,
+		fallback:   decision.Fallback,
 		started:    time.Now(),
 	}
+	if c.retriever != nil && req.ProjectID != "" {
+		l.ragEnabled = true
+		retrieval, err := c.retriever.Retrieve(ctx, req.ProjectID, req.Prompt)
+		if err != nil {
+			log.Printf("retrieval error: %v", err)
+		} else {
+			l.cacheVersion = retrieval.CorpusVersion
+			l.sources = retrieval.Sources
+			l.grounded = len(retrieval.Sources) > 0
+			if retrieval.Prompt != "" {
+				l.req.Prompt = retrieval.Prompt
+			}
+		}
+	}
 
-	namespace := cache.NewNamespace(req.APIKey, model.ID)
+	project := req.ProjectID
+	if project == "" {
+		project = req.APIKey
+	}
+	namespace := cache.NewProjectNamespace(project, l.model.ID, l.cacheVersion)
 	attempt, err := c.cache.Begin(ctx, namespace, req.Prompt)
 	if err != nil {
 		log.Printf("cache error: %v", err)
@@ -147,10 +206,17 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 			CacheHit: true,
 			Status:   entry.Status,
 		})
-		return Response{Body: entry.Response, Status: entry.Status, CacheHit: true}, nil
+		return Response{Body: entry.Response, Status: entry.Status, CacheHit: true, Grounded: l.grounded, Sources: l.sources, RAGEnabled: l.ragEnabled}, nil
 	}
 
-	body, status, err := c.provider.Complete(ctx, req.Prompt, l.model)
+	body, status, err := c.provider.Complete(ctx, l.req.Prompt, l.model)
+	if shouldFailover(err, status) && l.fallback.ID != "" && l.fallback.ID != l.model.ID {
+		l.failover = true
+		body, status, err = c.provider.Complete(ctx, l.req.Prompt, l.fallback)
+		if err == nil {
+			l.model = l.fallback
+		}
+	}
 	if err != nil {
 		return Response{}, err
 	}
@@ -158,7 +224,7 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 	tokensIn, tokensOut := observability.ParseTokens(body)
 	cost := l.model.Cost(tokensIn, tokensOut)
 	l.meter(ctx, usage.Entry{
-		APIKey:    req.APIKey,
+		APIKey:    l.identity(),
 		TokensIn:  tokensIn,
 		TokensOut: tokensOut,
 		CostUSD:   cost,
@@ -175,5 +241,22 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 		l.store(ctx, body, status)
 	}
 
-	return Response{Body: body, Status: status, Model: l.model.ID}, nil
+	return Response{Body: body, Status: status, Model: l.model.ID, Grounded: l.grounded, Sources: l.sources, Fallback: l.failover, RAGEnabled: l.ragEnabled}, nil
+}
+
+func shouldFailover(err error, status int) bool {
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false
+		}
+		return true
+	}
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
+}
+
+func (l *lifecycle) identity() string {
+	if l.req.ProjectID != "" {
+		return l.req.ProjectID
+	}
+	return l.req.APIKey
 }
