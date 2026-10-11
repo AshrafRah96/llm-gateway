@@ -19,7 +19,7 @@ const (
 	indexName           = "prompt_cache_v2"
 	keyPrefix           = "cache:v2:"
 	vectorDim           = 1536 // text-embedding-3-small
-	similarityThreshold = 0.95
+	SimilarityThreshold = 0.95
 	DefaultTTL          = 24 * time.Hour
 )
 
@@ -210,7 +210,7 @@ func (c *SemanticCache) parseSearchResult(results redis.FTSearchResult) (*CacheE
 	}
 
 	// Cosine distance to similarity
-	if 1-score < similarityThreshold {
+	if 1-score < SimilarityThreshold {
 		return nil, nil
 	}
 

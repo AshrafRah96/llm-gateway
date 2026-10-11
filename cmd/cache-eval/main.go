@@ -1,41 +1,44 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
+	"crypto/rand"
+	"crypto/sha256"
 	"flag"
 	"fmt"
-	"log"
 	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
 	"github.com/ashrafrah96/llm-gateway/internal/evaluation"
+	"github.com/ashrafrah96/llm-gateway/internal/evidence"
 	"github.com/redis/go-redis/v9"
 )
 
 type output struct {
-	CorpusVersion  string            `json:"corpus_version"`
-	GeneratedAt    time.Time         `json:"generated_at"`
-	RedisAddress   string            `json:"redis_address"`
-	EmbeddingModel string            `json:"embedding_model"`
-	CacheSchema    string            `json:"cache_schema"`
-	Report         evaluation.Report `json:"report"`
+	evaluation.Metadata
+	Report evaluation.Report `json:"report"`
 }
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatal(err)
+		message := err.Error()
+		if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+			message = strings.ReplaceAll(message, key, "[redacted]")
+		}
+		fmt.Fprintln(os.Stderr, message)
+		os.Exit(1)
 	}
 }
 
 func run() error {
 	datasetPath := flag.String("dataset", "docs/evaluation/cases-v1.json", "evaluation corpus")
-	jsonPath := flag.String("json", "tmp/cache-eval-results.json", "JSON output")
-	markdownPath := flag.String("markdown", "tmp/cache-eval-results.md", "Markdown output")
+	jsonPath := flag.String("json", "docs/evaluation/results-v1.json", "new JSON output")
+	markdownPath := flag.String("markdown", "docs/evaluation/results-v1.md", "new Markdown output")
+	environment := flag.String("environment", "unspecified", "machine, region and Redis deployment description (no secrets)")
 	flag.Parse()
-
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is required")
@@ -48,68 +51,47 @@ func run() error {
 	if err != nil {
 		return err
 	}
-
-	file, err := os.Open(*datasetPath)
+	corpusBytes, err := os.ReadFile(*datasetPath)
 	if err != nil {
-		return fmt.Errorf("open dataset: %w", err)
+		return fmt.Errorf("read dataset: %w", err)
 	}
-	defer file.Close()
-	corpus, err := evaluation.DecodeCorpus(file)
+	corpus, err := evaluation.DecodeCorpus(bytes.NewReader(corpusBytes))
 	if err != nil {
 		return err
 	}
 	if err := evaluation.Validate(corpus.Cases); err != nil {
 		return fmt.Errorf("validate corpus: %w", err)
 	}
-
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 	client := redis.NewClient(&redis.Options{Addr: redisAddr, Protocol: 2})
 	defer client.Close()
-	semanticCache, err := cache.NewSemanticCache(
-		context.Background(),
-		client,
-		cache.NewEmbeddingClient(apiKey),
-		ttl,
-	)
+	provenance, err := evidence.Capture(ctx, client)
+	if err != nil {
+		return err
+	}
+	semanticCache, err := cache.NewSemanticCache(ctx, client, cache.NewEmbeddingClient(apiKey), ttl)
 	if err != nil {
 		return fmt.Errorf("create semantic cache: %w", err)
 	}
-
-	report, err := evaluation.Run(context.Background(), semanticCache, corpus.Cases)
+	result := output{Metadata: evaluation.Metadata{
+		Provenance:    provenance,
+		CorpusVersion: corpus.Version, CorpusSHA256: fmt.Sprintf("%x", sha256.Sum256(corpusBytes)),
+		RunID: rand.Text(), RedisAddress: redisAddr, EmbeddingModel: cache.EmbeddingModel,
+		CacheSchema: cache.SchemaVersion, CacheTTL: ttl.String(), SimilarityThreshold: cache.SimilarityThreshold,
+		Environment: *environment,
+	}}
+	result.Report, err = evaluation.RunWithID(ctx, semanticCache, corpus.Cases, result.RunID)
 	if err != nil {
 		return err
 	}
-	result := output{
-		CorpusVersion:  corpus.Version,
-		GeneratedAt:    time.Now().UTC(),
-		RedisAddress:   redisAddr,
-		EmbeddingModel: "text-embedding-3-small",
-		CacheSchema:    cache.SchemaVersion,
-		Report:         report,
-	}
-	encoded, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode JSON result: %w", err)
-	}
-	if err := writeFile(*jsonPath, append(encoded, '\n')); err != nil {
+	result.GeneratedAt = time.Now().UTC()
+	if err := evidence.Write(*jsonPath, *markdownPath, result, result.Report.MarkdownWithMetadata(result.Metadata)); err != nil {
 		return err
 	}
-	if err := writeFile(*markdownPath, []byte(report.Markdown())); err != nil {
-		return err
-	}
-
 	fmt.Printf("wrote %s and %s\n", *jsonPath, *markdownPath)
-	if !report.PrecisionTargetMet {
-		return fmt.Errorf("precision %.1f%% did not meet the %.0f%% target", report.Precision*100, evaluation.PrecisionTarget*100)
-	}
-	return nil
-}
-
-func writeFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create output directory: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+	if !result.Report.PrecisionTargetMet || !result.Report.RecallTargetMet {
+		return fmt.Errorf("evaluation targets not met: precision %.1f%% (target %.0f%%), recall %.1f%% (target %.0f%%)", result.Report.Precision*100, evaluation.PrecisionTarget*100, result.Report.Recall*100, evaluation.RecallTarget*100)
 	}
 	return nil
 }

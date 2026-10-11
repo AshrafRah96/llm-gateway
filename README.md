@@ -280,7 +280,10 @@ how one of the bugs in
 [docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md) survived as long as it did.
 
 The real-embedding evaluation is separate from CI because it makes paid OpenAI calls.
-Follow [docs/EVALUATION.md](docs/EVALUATION.md) to run it.
+The committed [evaluation report](docs/evaluation/results-v1.md) records the corpus,
+threshold, precision, recall and lookup latency. Follow [docs/EVALUATION.md](docs/EVALUATION.md)
+to reproduce it. The opt-in [real-provider smoke report](docs/smoke/provider-v1.md)
+covers the gateway's JSON, cache, stream, cancellation and usage paths.
 
 ## Reviewing this
 
@@ -302,24 +305,24 @@ they were found, why the tests missed them, and what pins them now. That is prob
 most useful thing here.
 
 For the tests, [internal/handler/abandoned_test.go](internal/handler/abandoned_test.go)
-is the one I would look at. It cancels a request mid stream against a real provider and
-checks the caller still gets billed.
+is the one I would look at. It cancels a request mid stream against a local slow HTTP
+provider and checks the caller still gets billed.
 
 ## Known limitations
 
 Things that are not done, so you do not have to go looking for them.
 
-**Never run against real OpenAI.** Every provider test uses a local fake. The request
-and response shapes match OpenAI's documentation, but documentation is not the wire. The
-end to end smoke test needs a real key and has not been run.
+**The automated provider tests use local fakes.** The opt-in smoke report records the
+separate run against real OpenAI; it is intentionally excluded from CI because it needs
+a real key and incurs provider cost.
 
 **The token estimate is unreconciled.** Abandoned streams are billed on a rough four
 bytes per token. Nobody has checked that against an actual OpenAI invoice, and it reads
 low for non-English text.
 
-**Semantic similarity is corpus-dependent.** The 0.95 threshold remains a hypothesis
-until the committed evaluator is run and its precision target is met. Isolation tests
-prove the mechanics, not that every real prompt pair is safe to reuse.
+**Semantic similarity is corpus-dependent.** The 0.95 threshold is measured against the
+committed corpus in the evaluation report. That result describes the corpus, not every
+real prompt pair or production traffic.
 
 **The routing keyword list is a guess.** It has never been checked against real traffic
 to see how often it picks wrong.

@@ -2,17 +2,23 @@ package evaluation
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
+	"github.com/ashrafrah96/llm-gateway/internal/evidence"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
 )
 
-const PrecisionTarget = 0.95
+const (
+	PrecisionTarget = 0.95
+	RecallTarget    = 0.80
+)
 
 type Kind string
 
@@ -85,6 +91,8 @@ type Report struct {
 	LookupP95Ms          float64      `json:"lookup_p95_ms"`
 	PrecisionTarget      float64      `json:"precision_target"`
 	PrecisionTargetMet   bool         `json:"precision_target_met"`
+	RecallTarget         float64      `json:"recall_target"`
+	RecallTargetMet      bool         `json:"recall_target_met"`
 	Cases                []CaseResult `json:"cases"`
 }
 
@@ -125,16 +133,27 @@ func Validate(cases []Case) error {
 }
 
 func Run(ctx context.Context, store Cache, cases []Case) (Report, error) {
+	return RunWithID(ctx, store, cases, rand.Text())
+}
+
+// RunWithID runs the evaluator inside a unique cache namespace. The ID makes a
+// report reproducible against a disposable Redis instance and prevents an old
+// seed from surviving into a later run when a case is edited.
+func RunWithID(ctx context.Context, store Cache, cases []Case, runID string) (Report, error) {
+	if runID == "" {
+		return Report{}, fmt.Errorf("evaluation run ID is required")
+	}
 	report := Report{
 		Total:           len(cases),
 		PrecisionTarget: PrecisionTarget,
+		RecallTarget:    RecallTarget,
 		Cases:           make([]CaseResult, 0, len(cases)),
 	}
 	latencies := make([]float64, 0, len(cases))
 
 	for _, c := range cases {
 		model := router.Route(c.Source)
-		ns := cache.NewNamespace("semantic-evaluation:"+c.ID, model.ID)
+		ns := cache.NewNamespace("semantic-evaluation:"+runID+":"+c.ID, model.ID)
 		seed, err := store.Begin(ctx, ns, c.Source)
 		if err != nil {
 			return Report{}, fmt.Errorf("case %q begin cache seed: %w", c.ID, err)
@@ -185,6 +204,7 @@ func Run(ctx context.Context, store Cache, cases []Case) (Report, error) {
 	report.Recall = ratio(report.TruePositives, report.TruePositives+report.FalseNegatives)
 	report.CacheHitRate = ratio(report.UpstreamCallsAvoided, report.Total)
 	report.PrecisionTargetMet = report.Precision >= PrecisionTarget
+	report.RecallTargetMet = report.Recall >= RecallTarget
 	sort.Float64s(latencies)
 	report.LookupP50Ms = percentile(latencies, 0.50)
 	report.LookupP95Ms = percentile(latencies, 0.95)
@@ -192,11 +212,64 @@ func Run(ctx context.Context, store Cache, cases []Case) (Report, error) {
 }
 
 func (r Report) Markdown() string {
-	target := "met"
+	return r.MarkdownWithMetadata(Metadata{})
+}
+
+type Metadata struct {
+	evidence.Provenance
+	CorpusVersion       string    `json:"corpus_version"`
+	CorpusSHA256        string    `json:"corpus_sha256"`
+	GeneratedAt         time.Time `json:"generated_at"`
+	RunID               string    `json:"run_id"`
+	RedisAddress        string    `json:"redis_address"`
+	EmbeddingModel      string    `json:"embedding_model"`
+	CacheSchema         string    `json:"cache_schema"`
+	CacheTTL            string    `json:"cache_ttl"`
+	SimilarityThreshold float64   `json:"similarity_threshold"`
+	Environment         string    `json:"environment"`
+}
+
+func (r Report) MarkdownWithMetadata(metadata Metadata) string {
+	precisionTarget := "met"
 	if !r.PrecisionTargetMet {
-		target = "not met"
+		precisionTarget = "not met"
+	}
+	recallTarget := "met"
+	if !r.RecallTargetMet {
+		recallTarget = "not met"
+	}
+
+	var cases strings.Builder
+	if len(r.Cases) > 0 {
+		cases.WriteString("\n## Cases\n\n| ID | Kind | Tier | Model | Hit | Correct | Lookup latency |\n|---|---|---|---|---:|---:|---:|\n")
+		for _, c := range r.Cases {
+			fmt.Fprintf(&cases, "| %s | %s | %s | %s | %t | %t | %.2f ms |\n", c.ID, c.Kind, c.ExpectedTier, c.Model, c.Hit, c.Correct, c.LookupLatencyMs)
+		}
+	}
+
+	metadataRows := ""
+	if metadata.RunID != "" {
+		metadataRows = fmt.Sprintf(`
+## Run metadata
+
+| Field | Value |
+|---|---|
+| Corpus version | %s |
+| Corpus SHA-256 | %s |
+| Run ID | %s |
+| Generated at | %s |
+| Embedding model | %s |
+| Similarity threshold | %.2f |
+| Cache schema | %s |
+| Redis address | %s |
+| Cache TTL | %s |
+| Environment | %s |
+%s
+`, metadata.CorpusVersion, metadata.CorpusSHA256, metadata.RunID, metadata.GeneratedAt.UTC().Format(time.RFC3339), metadata.EmbeddingModel, metadata.SimilarityThreshold, metadata.CacheSchema, metadata.RedisAddress, metadata.CacheTTL, metadata.Environment, metadata.Provenance.Markdown())
 	}
 	return fmt.Sprintf(`# Semantic cache evaluation
+
+%s
 
 | Metric | Result |
 |---|---:|
@@ -207,12 +280,15 @@ func (r Report) Markdown() string {
 | Upstream calls avoided | %d |
 | Lookup latency p50 | %.2f ms |
 | Lookup latency p95 | %.2f ms |
+| Precision target | %.0f%% (%s) |
+| Recall target | %.0f%% (%s) |
 
-The %.0f%% precision target was **%s**. These numbers describe this committed corpus and
-the environment recorded alongside the JSON result; they are not production claims.
-`, r.Total, r.Precision*100, r.Recall*100, r.CacheHitRate*100,
-		r.UpstreamCallsAvoided, r.LookupP50Ms, r.LookupP95Ms,
-		r.PrecisionTarget*100, target)
+These numbers describe this committed corpus and the environment recorded above; they
+are not production claims.
+%s
+`, metadataRows, r.Total, r.Precision*100, r.Recall*100, r.CacheHitRate*100,
+		r.UpstreamCallsAvoided, r.LookupP50Ms, r.LookupP95Ms, r.PrecisionTarget*100,
+		precisionTarget, r.RecallTarget*100, recallTarget, cases.String())
 }
 
 func tierForModel(model router.Model) Tier {

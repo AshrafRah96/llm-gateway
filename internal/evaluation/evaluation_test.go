@@ -6,8 +6,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
+	"github.com/ashrafrah96/llm-gateway/internal/evidence"
 )
 
 type fakeCache struct {
@@ -60,6 +62,9 @@ func TestRunCalculatesClassificationMetrics(t *testing.T) {
 	if report.UpstreamCallsAvoided != 2 || len(report.Cases) != 4 {
 		t.Fatalf("report = %+v", report)
 	}
+	if report.PrecisionTarget != PrecisionTarget || report.RecallTarget != RecallTarget || report.PrecisionTargetMet || report.RecallTargetMet {
+		t.Fatalf("targets = precision %.2f/%v recall %.2f/%v", report.PrecisionTarget, report.PrecisionTargetMet, report.RecallTarget, report.RecallTargetMet)
+	}
 }
 
 func TestValidateRequiresTwentyCasesOfEachKindAndBothTiers(t *testing.T) {
@@ -80,10 +85,25 @@ func TestValidateRequiresTwentyCasesOfEachKindAndBothTiers(t *testing.T) {
 }
 
 func TestMarkdownStatesWhetherPrecisionTargetWasMet(t *testing.T) {
-	report := Report{Total: 40, Precision: 0.94, Recall: 0.8}
-	got := report.Markdown()
+	report := Report{Total: 40, Precision: 0.94, Recall: 0.8, PrecisionTarget: PrecisionTarget, RecallTarget: RecallTarget}
+	got := report.MarkdownWithMetadata(Metadata{
+		CorpusVersion:       "v1",
+		CorpusSHA256:        "abc",
+		GeneratedAt:         time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC),
+		RunID:               "run-1",
+		Provenance:          evidence.Provenance{SourceCommit: "deadbeef", RedisVersion: "8.0.0", Runtime: "go1.25 linux/amd64"},
+		EmbeddingModel:      "embedding-model",
+		SimilarityThreshold: 0.95,
+		CacheSchema:         "v2",
+		RedisAddress:        "redis:6379",
+	})
 	if want := "not met"; !strings.Contains(strings.ToLower(got), want) {
 		t.Fatalf("Markdown did not state that the target was %s:\n%s", want, got)
+	}
+	for _, want := range []string{"Corpus SHA-256", "Similarity threshold", "Recall target"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Markdown missing %q:\n%s", want, got)
+		}
 	}
 }
 

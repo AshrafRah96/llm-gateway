@@ -9,6 +9,8 @@ import (
 	"net/http"
 )
 
+const EmbeddingModel = "text-embedding-3-small"
+
 type EmbeddingClient struct {
 	apiKey string
 	url    string
@@ -34,7 +36,7 @@ type embeddingResponse struct {
 
 func (c *EmbeddingClient) Embed(ctx context.Context, text string) ([]float32, error) {
 	reqBody, err := json.Marshal(embeddingRequest{
-		Model: "text-embedding-3-small",
+		Model: EmbeddingModel,
 		Input: text,
 	})
 	if err != nil {
