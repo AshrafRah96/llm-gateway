@@ -27,8 +27,8 @@ picks a model, calls OpenAI, and records what it cost.
 
 The cache-quality claims are measurable rather than assumed. The repository includes a
 [versioned 40-case corpus](docs/evaluation/cases-v1.json) and an opt-in evaluator for
-precision, recall, hit rate and lookup latency. No result is published until that
-command has run; see [evaluation](docs/EVALUATION.md).
+precision, recall, hit rate and lookup latency. The measured report is published only
+after a real-embedding run; see [evaluation](docs/EVALUATION.md) for the exact command.
 
 **Stack:** Go, Redis/Redis Search, Lua, Server-Sent Events, Docker and GitHub Actions.
 
@@ -312,7 +312,7 @@ provider and checks the caller still gets billed.
 
 Things that are not done, so you do not have to go looking for them.
 
-**The automated provider tests use local fakes.** The opt-in smoke report records the
+**The automated provider tests use local fakes.** The opt-in smoke command records a
 separate run against real OpenAI; it is intentionally excluded from CI because it needs
 a real key and incurs provider cost.
 
