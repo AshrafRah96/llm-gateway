@@ -7,3 +7,6 @@
 *.png binary
 *.jpg binary
 *.exe binary
+
+# Preserve checked Archify HTML bytes.
+docs/diagrams/architecture.html -whitespace

@@ -1,0 +1,24 @@
+{
+  "diagram_type": "architecture",
+  "artifact_sha256": "ddd8b791d553ab2e437b5db4f8160523ef0d905bb9ac2d75de6c4c129a4e2409",
+  "export_sha256": "b87d293498678ce41fc4811776d048c8052724826a0ea021c47e4746a3752249",
+  "visual_review": "passed",
+  "correction_rounds": 0,
+  "reviewed_html_captures": [
+    "1440x900 light",
+    "1440x900 dark",
+    "2048x1320 light",
+    "2048x1320 dark"
+  ],
+  "observations": [
+    "No node/label overlap or line crossing in reviewed captures.",
+    "Prompt trust boundary and policy cache scope are present.",
+    "Canonical SVG contains all 12 components and 11 connections.",
+    "SVG inspected using a temporary renderer with its light CSS palette resolved; canonical SVG bytes unchanged.",
+    "Publication changed output paths only; SVG trailing whitespace normalized. No diagram geometry or labels changed."
+  ],
+  "limitations": [
+    "Hosted GitHub rendering was not tested.",
+    "Browser connector denied direct local-file README preview; no bypass was attempted."
+  ]
+}

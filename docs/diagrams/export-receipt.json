@@ -1,0 +1,10 @@
+{
+  "diagram_type": "architecture",
+  "source_artifact_sha256": "ddd8b791d553ab2e437b5db4f8160523ef0d905bb9ac2d75de6c4c129a4e2409",
+  "specification_sha256": "a850c2a90a0e1f97a65a14042c565f09594500a527191c6eb79e7c9121270219",
+  "export": "docs/diagrams/architecture.svg",
+  "export_sha256": "b87d293498678ce41fc4811776d048c8052724826a0ea021c47e4746a3752249",
+  "export_bytes": 164997,
+  "method": "Archify SVG Auto export; trailing whitespace normalized",
+  "derivation": "Same diagram topology and geometry as the inspected original export; current HTML uses tracked publication paths."
+}

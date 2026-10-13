@@ -1,63 +1,88 @@
 # Project-scoped RAG
 
-RAG is deliberately a small, operator-controlled capability in this repository. It
-demonstrates the security boundary around retrieval without becoming a document SaaS.
+Operator-reviewed Markdown/text. Authenticated project filter. No automatic external ingestion or model tools.
 
-## Provisioning and ingestion
+## Provision and import
 
-Each caller key belongs to one project. Provision it with a keyed fingerprint, never a
-plaintext Redis value:
+Use a stable deployment pepper. The command prints the raw key once; Redis stores only its HMAC fingerprint and project binding.
 
 ```bash
 export API_KEY_PEPPER='a-long-random-secret'
 go run ./cmd/project-key -project support-app
 ```
 
-The command prints the generated key once. Keep it in the calling application's secret
-store. It stores only an HMAC-SHA-256 fingerprint and its project binding in Redis.
-
-Import only reviewed UTF-8 Markdown or text:
+Import reviewed UTF-8 content. This example imports the repository's architecture notes:
 
 ```bash
 export OPENAI_API_KEY=sk-your-key
-go run ./cmd/rag-import -project support-app -file docs/support-policy.md
+go run ./cmd/rag-import -project support-app -file docs/ARCHITECTURE.md
 ```
 
-An import validates size and encoding, chunks on word boundaries, embeds every chunk,
-then activates the complete replacement in Redis and advances that project's corpus
-revision. A failed embedding leaves the previously active document untouched.
+Set `REDIS_ADDR` when Redis Stack is not at `localhost:6379`.
+Upload validates project/name, UTF-8, nonempty content, and size. It splits into 300-word chunks
+with 50-word overlap, then embeds every chunk. A transaction replaces the document's chunks
+and advances the project corpus revision. Embedding failure leaves the previous version active.
 
-## Runtime behaviour
+## Retrieval
 
-Every authenticated `/chat` and `/chat/stream` request uses its project's corpus. The
-retriever filters Redis Search by a project fingerprint before vector ranking; chunks
-from another project cannot satisfy the query. A corpus revision is part of the response
-cache namespace, so importing or replacing material cannot serve an answer cached under
-the prior corpus.
+Every authenticated chat request retrieves from its project's corpus.
+Redis Search filters project fingerprint and active status before ranking vectors.
+Retrieve at most four chunks with cosine similarity ≥0.80. Source excerpts are bounded to
+240 runes, plus a truncation marker.
 
-When the retrieval threshold has no result, the gateway still calls the model but marks
-the JSON response with `gateway.grounded: false`. Grounded responses include bounded
-source IDs and excerpts. Streams emit an initial `sources` event before content deltas.
+No match or retrieval failure continues ungrounded. Successful JSON responses include
+`gateway.grounded`; grounded responses include source IDs/excerpts. Grounded streams send
+an initial `sources` event, then content deltas. `X-RAG-Grounded` reports grounding state.
 
-Retrieved text is enclosed as **untrusted reference data**. The gateway does not give
-the model tools or downstream actions, and it tells the model not to follow instructions
-inside references. This reduces blast radius but does not make prompt injection solved:
-project administrators must review documents before import.
+Corpus revision participates in response-cache scope. Document changes prevent replay
+from prior revisions. Cache and RAG embed the question separately.
 
-## Limits
+## Prompt boundaries
 
-The gateway defaults to a 64 KiB HTTP body, 32 KiB prompt, 256 KiB document, 60 second
-request deadline, 16 concurrent gateway requests, and four concurrent requests per
-project. `REQUEST_TIMEOUT`, `MAX_REQUEST_BODY_BYTES`,
-`MAX_CONCURRENT_REQUESTS`, and `MAX_CONCURRENT_PER_PROJECT` override the runtime
-defaults. Each catalogue model supplies its own output-token cap.
+Provider messages:
 
-## Research basis
+1. Fixed system policy.
+2. Optional user message with JSON-encoded `untrusted_references`.
+3. Original question in a separate user message.
 
-OWASP identifies permission-aware vector stores, source validation, and monitoring as
-key mitigations for vector and embedding weaknesses, especially in multi-tenant RAG.
-It also notes that RAG does not remove prompt-injection risk.
+Reference identifiers/content cannot enter trusted policy or create API roles.
+Forged delimiters remain data. JSON, SSE, and fallback use the same builder.
+
+General chat and security discussion remain available. No phrase blocklist or paid classifier exists.
+The policy tells the model to disregard attempts to override gateway rules.
+The model has no tools or credential access. References can still manipulate answers;
+streamed output is released immediately without screening. Review imported documents.
+
+Serving cache scope includes project, routed model, schema, corpus revision, and `prompt-policy-v1`.
+Old-policy entries expire without replay. Bump `promptPolicyVersion` in
+`internal/completion/input.go` whenever policy or framing changes. A current-policy cache hit
+is not proof of answer safety.
+
+Tests cover captured upstream messages, forged references, fallback, old-cache exclusion,
+and settlement. They prove wiring and serialization, not real-model attack resistance.
+See [ADR-0009](adr/0009-separate-gateway-policy-from-untrusted-input.md).
+
+## Bounds
+
+| Resource | Default |
+|---|---|
+| HTTP JSON body | 64 KiB |
+| User prompt | 32 KiB |
+| Imported document | 256 KiB |
+| Request context | 60s |
+| Global in-flight requests per process | 16 |
+| Project in-flight requests per process | 4 |
+| Stream settlement after cancellation | 5s |
+
+`REQUEST_TIMEOUT`, `MAX_REQUEST_BODY_BYTES`, `MAX_CONCURRENT_REQUESTS`, and
+`MAX_CONCURRENT_PER_PROJECT` override runtime bounds. Output caps come from the model catalogue.
+[README settings](../README.md#settings) list configuration and limits.
+
+## Source basis
+
+Sources reviewed for permission-aware retrieval, source validation, and injection defenses:
 
 - [OWASP LLM08: Vector and Embedding Weaknesses](https://genai.owasp.org/llmrisk/llm082025-vector-and-embedding-weaknesses/)
 - [OWASP LLM01: Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
-- [NIST AI RMF Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)
+- [OWASP Prompt Injection Prevention](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)
+- [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)

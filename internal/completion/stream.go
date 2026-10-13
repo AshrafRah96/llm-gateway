@@ -77,13 +77,13 @@ func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 		// An entry we cannot read is a miss, not a failure.
 	}
 
-	body, status, err := c.provider.Stream(ctx, l.req.Prompt, l.model)
+	body, status, err := c.provider.Stream(ctx, l.input, l.model)
 	if shouldFailover(err, status) && l.fallback.ID != "" && l.fallback.ID != l.model.ID {
 		if body != nil {
 			_ = body.Close()
 		}
 		s.failover = true
-		body, status, err = c.provider.Stream(ctx, l.req.Prompt, l.fallback)
+		body, status, err = c.provider.Stream(ctx, l.input, l.fallback)
 		if err == nil && status == http.StatusOK {
 			l.model = l.fallback
 		}
@@ -180,7 +180,7 @@ func (s *Stream) settle() error {
 	}
 
 	if !s.metered {
-		s.tokensIn = estimateTokens(s.lifecycle.req.Prompt)
+		s.tokensIn = s.lifecycle.input.estimateTokens()
 		s.tokensOut = estimateTokens(s.content.String())
 	}
 

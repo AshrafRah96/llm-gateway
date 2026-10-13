@@ -16,21 +16,16 @@ import (
 
 const maxSSELine = 1 << 20
 
-type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
 type streamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
 type openAIRequest struct {
-	Model         string          `json:"model"`
-	Messages      []openAIMessage `json:"messages"`
-	Stream        bool            `json:"stream,omitempty"`
-	StreamOptions *streamOptions  `json:"stream_options,omitempty"`
-	MaxTokens     int             `json:"max_tokens,omitempty"`
+	Model         string               `json:"model"`
+	Messages      []completion.Message `json:"messages"`
+	Stream        bool                 `json:"stream,omitempty"`
+	StreamOptions *streamOptions       `json:"stream_options,omitempty"`
+	MaxTokens     int                  `json:"max_tokens,omitempty"`
 }
 
 type OpenAIClient struct {
@@ -66,11 +61,11 @@ func NewOpenAIClient(apiKey string) *OpenAIClient {
 }
 
 // Complete returns the full response body. Callers own nothing afterwards.
-func (c *OpenAIClient) Complete(ctx context.Context, prompt string, m router.Model) ([]byte, int, error) {
+func (c *OpenAIClient) Complete(ctx context.Context, input completion.ProviderInput, m router.Model) ([]byte, int, error) {
 	body, status, err := c.do(ctx, openAIRequest{
 		Model:     m.ID,
 		MaxTokens: m.MaxOutputTokens,
-		Messages:  []openAIMessage{{Role: "user", Content: prompt}},
+		Messages:  input.Messages(),
 	})
 	if err != nil {
 		return nil, 0, err
@@ -87,13 +82,13 @@ func (c *OpenAIClient) Complete(ctx context.Context, prompt string, m router.Mod
 // Stream translates OpenAI's SSE wire format into provider-neutral events.
 // include_usage is required or the terminal usage event never arrives and the
 // completion module cannot meter the stream.
-func (c *OpenAIClient) Stream(ctx context.Context, prompt string, m router.Model) (completion.ProviderStream, int, error) {
+func (c *OpenAIClient) Stream(ctx context.Context, input completion.ProviderInput, m router.Model) (completion.ProviderStream, int, error) {
 	body, status, err := c.do(ctx, openAIRequest{
 		Model:         m.ID,
 		MaxTokens:     m.MaxOutputTokens,
 		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
-		Messages:      []openAIMessage{{Role: "user", Content: prompt}},
+		Messages:      input.Messages(),
 	})
 	if err != nil {
 		return nil, 0, err

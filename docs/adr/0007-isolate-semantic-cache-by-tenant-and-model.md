@@ -3,41 +3,27 @@
 Status: Accepted
 Date: 2026-07-27
 
-## Context
-
-ADR-0002 originally chose a shared semantic cache to maximise hit rate. That permits a
-prompt from one API key to receive another key's stored response. A similarity score is
-not an authorization check, and prompts may contain private data.
-
-A model or cache-format change can also make an otherwise similar answer stale.
-
 ## Decision
 
-Route before lookup. Filter every vector query by:
+Route before lookup. Apply tenant, primary routed model, and schema filters before vector ranking.
+Use `cache:v2:` keys and `prompt_cache_v2`; never read old unscoped entries.
+Store the same metadata and expire entries after `CACHE_TTL`, default 24h.
+Similarity is not authorization.
 
-- a SHA-256 fingerprint of the caller's API key;
-- routed model ID;
-- cache schema version.
+## Current scope
 
-Store the same metadata on every entry and expire it after `CACHE_TTL`, which defaults
-to 24 hours. Use a new `cache:v2:` prefix and index, and never read old unscoped keys.
+The original decision fingerprinted caller keys. Project authentication now scopes the
+cache to SHA-256 of authenticated `ProjectID`. Keys in one project share cache and usage;
+key quotas still use HMAC `KeyID`.
+RAG adds corpus revision. ADR-0009 adds `prompt-policy-v1`.
+Fallback answers retain the original primary-route namespace.
 
-## Consequences
+Raw keys and prompts never appear in semantic-cache key names. HMAC auth fingerprints
+replace plaintext caller-key records; key rotation/expiry remain open work.
+Model, schema, corpus, or policy scope changes cause misses. TTL bounds reuse and storage lifetime.
 
-Tenants cannot benefit from one another's cached answers, so the hit rate will be lower.
-That cost is accepted because confidentiality is not a performance tradeoff.
+## Tradeoff and rejected options
 
-Raw API keys and prompts do not appear in semantic-cache key names. The fingerprint is
-stable, so weak client keys could still be guessed offline; stronger authentication-key
-storage is separate roadmap work.
-
-Model and schema changes cause misses instead of returning an answer from a different
-behavioral contract. TTL bounds staleness and storage growth.
-
-## What we rejected
-
-Keeping a global cache for public-looking prompts. Correctly classifying a prompt as
-public would itself require a reliable security policy.
-
-Migrating old entries. They have no tenant metadata, so there is no safe tenant to
-assign them to.
+Project isolation lowers hit rate; confidentiality wins.
+A global cache for "public" prompts requires reliable public/private classification and was rejected.
+Old unscoped entries have no safe tenant assignment, so migration was rejected.

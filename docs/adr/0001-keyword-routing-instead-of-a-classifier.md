@@ -3,41 +3,19 @@
 Status: Accepted
 Date: 2026-07-26
 
-## Context
-
-The gateway picks between a cheap model and an expensive one. Something has to decide
-which prompt gets which.
-
-The obvious approach is to ask a model. Send the prompt to a small classifier first, let
-it judge the difficulty, then route accordingly. It reads well on a diagram.
-
-It also means every request now makes two API calls. The classifier adds its own latency
-before the real answer starts, and it costs money on every request including the ones
-that were always going to be cheap. For a gateway whose whole point is reducing spend,
-paying per request to decide how much to spend is a bad trade.
-
 ## Decision
 
-Route on prompt length and a keyword list. Prompts over 500 characters go to the
-expensive model, as do prompts containing words like "analyze", "compare", "debug" or
-"step by step". Everything else goes to the cheap one.
-
+Route the original question locally. Over 500 **bytes**, or a case-insensitive complexity
+keyword, selects the powerful tier. Otherwise select the cheap tier.
+Examples: `analyze`, `compare`, `debug`, `step by step`.
 See `internal/router/router.go`.
 
-## Consequences
+## Tradeoff
 
-Routing costs nothing and adds no latency. It is also crude, and it will get things
-wrong in both directions. A short prompt can be hard ("prove Fermat's last theorem") and
-a long one can be trivial (a wall of text with "summarise this" on the end).
+A classifier adds a paid call and latency before every answer, including simple questions.
+Local routing avoids that call but misclassifies short hard questions and long trivial ones.
+Request logs include selected model and original prompt length; routing quality is not measured yet.
+Revisit a classifier when measured routing mistakes cost more than classification.
 
-The wrongness is cheap to observe, because every request logs the model it picked
-alongside the prompt length. If the logs show a pattern of bad calls, the keyword list
-is one file and one test away from changing.
-
-## What we rejected
-
-A classifier model. Revisit if the logs show routing mistakes costing more than a
-classifier would, which would take a lot of mistakes at current prices.
-
-Letting callers pick the model themselves. Callers will pick the expensive one, which
-defeats the purpose.
+Caller-selected models were rejected because they bypass gateway cost policy.
+Runtime model IDs and same-provider fallback IDs are configurable; prices/output caps remain tier constants.

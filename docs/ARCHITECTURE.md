@@ -1,91 +1,122 @@
 # Architecture
 
-This gateway sits between an application and OpenAI. It centralises model policy,
-project-scoped retrieval, semantic reuse, quotas and usage tracking while remaining a
-focused reference implementation rather than a complete production service.
+Go HTTP gateway. OpenAI handles embeddings and chat. Redis Stack holds access, vector,
+and usage state. All Redis boxes in the diagram represent one configured instance.
 
-## Request flow
+[![Current gateway architecture](diagrams/architecture.svg)](diagrams/architecture.svg)
 
-```text
-HTTP client (X-API-Key)
-  |
-  v
-HMAC project authentication -- invalid --> 401
-  |
-  v
-rate limit + global/project concurrency caps -- full --> 429 / 503
-  |
-  v
-project-filtered vector retrieval
-  |                         \
-  |                          \-- no match: continue ungrounded
-  v
-deterministic primary model route
-  |
-  v
-project + model + corpus-revision semantic response cache -- hit --> response
-  |
-  v
-OpenAI primary -- transient pre-output failure --> one configured fallback
-  |
-  v
-completion or SSE stream --> meter --> cache complete success --> respond
-```
+[Interactive Archify viewer](diagrams/architecture.html)
+· [Diagram source](diagrams/architecture.json)
 
-Retrieved documents are untrusted reference data, not executable instructions. The
-gateway does not expose tools or downstream actions to the model. A retrieval miss still
-calls the model but marks the response as ungrounded; a successful retrieval returns
-bounded source metadata.
+## Request lifecycle
 
-## Modules and seams
+1. Authenticate key; carry non-secret project/key identity.
+2. Apply key quota, process-wide and project concurrency caps, body limit, and deadline.
+3. Route the original question.
+4. Retrieve project-filtered chunks; errors or no match continue ungrounded.
+5. Embed the question and search the scoped response cache; errors become misses.
+6. A hit returns/replays stored content without chat generation or usage increments.
+7. A miss builds trusted system policy, encoded reference data, and a separate question.
+8. Call the primary model; try one distinct configured fallback on eligible pre-output failures.
+9. Meter, log, cache complete success, and return JSON or SSE.
+
+RAG and cache make separate embedding calls, including on cache hits. Usage totals meter
+chat completions, not embedding spend.
+
+## Ownership
 
 | Module | Responsibility |
 |---|---|
-| `application` | Validates configuration, owns Redis, and composes the HTTP server. |
-| `auth` | Looks up HMAC-fingerprinted project keys and returns a non-secret principal. |
-| `rag` | Validates, chunks, embeds and retrieves operator-reviewed project documents. |
-| `completion` | Coordinates retrieval, routing, cache, provider calls, metering and streaming. |
-| `cache` | Performs semantic response caching within a project/model/corpus namespace. |
-| `ratelimit` | Makes distributed sliding-window decisions in Redis. |
-| `provider` | Translates OpenAI HTTP and SSE wire formats into provider-neutral events. |
-| `handler` | Decodes HTTP requests and emits JSON or stable SSE responses. |
+| `application` | Validate environment, create indexes, own Redis, compose server |
+| `auth` | HMAC key lookup and project principal |
+| `middleware` | Admission gates and request bounds |
+| `handler` | HTTP decoding, response metadata, outbound SSE |
+| `completion` | Route/retrieve/cache/provider policy, message builder, usage settlement |
+| `router` | Model catalogue, prices, deterministic primary/fallback decision |
+| `rag` | Validate/chunk/embed reviewed documents; project-filtered retrieval |
+| `cache` | Prompt embedding, scoped vector lookup, TTL storage |
+| `ratelimit` | Atomic Redis Lua decision; in-memory adapter for tests |
+| `provider` | OpenAI HTTP; decode wire SSE into neutral events |
+| `usage` | Redis project aggregates |
+| `observability` | Parse tokens and emit structured logs |
+| `evaluation` / `evidence` | Opt-in measurements, provenance, reports |
 
-Both `/chat` and `/chat/stream` use the same completion lifecycle. Normal stream
-exhaustion settles cache, usage and logs; `Close` is an idempotent fallback for client
-abandonment.
+`/chat` and `/chat/stream` share one private lifecycle. Normal exhaustion settles streams;
+`Close` is the idempotent abandonment fallback. HTTP owns SSE encoding; provider owns wire decoding.
 
-## Project identity, RAG and cache isolation
+## Identity and cache scope
 
-Authentication derives a project principal from an HMAC fingerprint of the caller key.
-Raw keys do not enter completion, rate-limit, usage or cache state.
+Authentication returns `ProjectID` and HMAC `KeyID`. Raw caller keys stop at authentication.
+Key quotas use `KeyID`. RAG, cache, usage, and project concurrency use `ProjectID`.
+Concurrency caps are per process; Redis quotas are shared across instances.
+Quota approval precedes concurrency/body validation; later failures can still consume a slot.
 
-RAG stores each chunk with a project fingerprint and filters that field before Redis
-Search ranks vectors. Each response-cache namespace contains:
+Cache queries filter before ranking:
 
-- `tenant`: SHA-256 of the authenticated project ID;
-- `model`: the deterministic route's selected model;
-- `version`: the cache schema and current project corpus revision.
+| Field | Value |
+|---|---|
+| `tenant` | SHA-256 of project ID |
+| `model` | Primary deterministic route's model ID |
+| `version` | Cache schema `v2`, optional corpus revision, `prompt-policy-v1` |
 
-Changing a project's documents advances its corpus revision, so a response generated
-from prior context cannot be replayed. Cache operations retain one prompt embedding for
-both lookup and store; cache failures are logged and treated as misses.
+Document replacement advances corpus revision. Policy/framing changes require a new
+`promptPolicyVersion` in `internal/completion/input.go`. Old entries expire normally.
+The attempt retains one embedding for lookup and store. Fallback responses use the
+original routed namespace; billed usage uses the model that produced the response.
 
-## Resource and failure policy
+## Prompt trust boundary
 
-Requests have bounded bodies, prompts, deadlines, output-token caps, and global and
-per-project concurrency limits before they reach an embedding or completion provider.
-Authentication and limits fail closed. Cache and retrieval failures fail open as
-ungrounded completion requests because they are optimisations, not authorization rules.
+`ProviderInput.Messages()` supplies the only system message. Reference identifiers and
+content occupy JSON-encoded user data; the original question occupies the final user message.
+Forged delimiters cannot create API message roles. JSON, SSE, and fallback calls share this builder.
 
-The configured fallback is attempted once only for a transient transport failure or an
-HTTP 408, 429, or 5xx before any output is delivered. A stream is never replayed after
-it emits content. Complete successful responses may be cached; partial streams are
-metered with a labelled token estimate and are never cached.
+The model has no tools or gateway credentials. General security discussion remains allowed.
+No phrase blocklist, classifier, or output screening exists. Role separation is an application
+property; model resistance still needs adversarial evaluation.
 
-## Further reading
+## Failures and settlement
 
-- [Project-scoped RAG](RAG.md)
+| Condition | Behavior |
+|---|---|
+| Missing/invalid key | 401 |
+| Authentication/quota store error | 500; reject |
+| Key quota or project concurrency full | 429 |
+| Global concurrency full | 503 |
+| Invalid body/prompt | 400 or 413 |
+| Retrieval failure | Log; continue ungrounded |
+| Cache failure | Log; continue as miss |
+| Transport error, HTTP 408/429/5xx | One distinct configured fallback before output |
+| Cancellation/deadline error | No fallback |
+| Provider error after fallback | Preserve status; transport errors become 502 |
+| Stream read failure/abandonment | Meter received work; never cache partial content |
+
+Fallback defaults equal the primary, so default routes do not retry. Streams never replay after emitting content.
+
+Without provider usage, input estimates include policy, references, and question. Output estimates use received content.
+Estimates use roughly four bytes per token, omit exact message-framing overhead, and carry an estimated flag.
+Cancellation-independent settlement has a 5s budget. Usage writes are best effort and use floating-point USD.
+
+## Startup and deployment
+
+`main.go` gives startup 10s and shutdown 30s. `application.New` checks Redis and creates
+cache/RAG indexes before serving on `:8080`. `/health` reports liveness only.
+Compose exposes Redis/RedisInsight without ACL/TLS and has no declared persistent volume.
+No durable production deployment is claimed.
+
+## Diagram evidence
+
+The viewer and SVG reflect the applied working-tree code. Archify validates citations
+against a frozen local source snapshot, kept as a Git bundle beside `candidate.json`.
+The snapshot is separate from the project's branch. Source links remain local because
+that snapshot revision is not a published GitHub commit.
+
+The SVG is the viewer's canonical export. README embeds it; the HTML retains exploration,
+source details, themes, and export controls. Regenerate both from the same candidate after code changes.
+
+## Related docs
+
+- [RAG](RAG.md)
 - [Threat model](THREAT-MODEL.md)
 - [Roadmap](ROADMAP.md)
-- [Decision records](adr/README.md)
-- [Evaluation method](EVALUATION.md)
+- [Decisions](adr/README.md)
+- [Evaluation](EVALUATION.md)

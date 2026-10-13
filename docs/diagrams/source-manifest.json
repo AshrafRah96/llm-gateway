@@ -1,0 +1,287 @@
+{
+  "base_revision": "2759e01c6c9c63dccf01f7be9523c981066f98eb",
+  "snapshot_revision": "49c1c6aab75c68f67281941060cd909501db9fd5",
+  "repository": "https://github.com/AshrafRah96/llm-gateway.git",
+  "source_files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "ebb0760bc32347f1f01a5fb21cd9468d298b7569bde4def51dd7b7ae77972518"
+    },
+    {
+      "path": "Dockerfile",
+      "sha256": "409ef60c97e84f92662624a387ed7a195f1a65b7a5e6e25c0ecde38344f09933"
+    },
+    {
+      "path": "cmd/cache-eval/main.go",
+      "sha256": "633b66695c76c6c6990e38f75d2f9ca83d78cebf37c11aa89aee1a5ae7b67317"
+    },
+    {
+      "path": "cmd/project-key/main.go",
+      "sha256": "898904431b1db9ef8a8f541eb8a7f4775324d53228b2f846edd69df0f9bbb5a9"
+    },
+    {
+      "path": "cmd/provider-smoke/main.go",
+      "sha256": "89e700e60cff92cb377ee338c3d6e0d3f108498fd2ddd5943a151ce9fd31c22e"
+    },
+    {
+      "path": "cmd/rag-import/main.go",
+      "sha256": "bffff724556aae8fea18abac39d3c66b5ce01702708428b101202fec0a58787b"
+    },
+    {
+      "path": "docker-compose.yml",
+      "sha256": "1e81b89b8548e66221fe05f1035c1ec639460dadbda6846653c3164d22fc6605"
+    },
+    {
+      "path": "go.mod",
+      "sha256": "64fb62ff2aec70cd0778a8797d06a7422a19f4c67231b69bbc56049e2b3dd276"
+    },
+    {
+      "path": "go.sum",
+      "sha256": "b8d1db338f382174ceb098fc95a164f66c5ec26ad3595245bce165d0da539163"
+    },
+    {
+      "path": "internal/application/application.go",
+      "sha256": "22a0118df2ffb28f08cd8c3176281336046119afaf9fabd14cd49359d7f063f4"
+    },
+    {
+      "path": "internal/application/application_test.go",
+      "sha256": "9e2d849339dc29bf1a2b783d77059a78c9c980c3096a9424f2626ebaec72cdbd"
+    },
+    {
+      "path": "internal/auth/keystore.go",
+      "sha256": "ed67cd87676b0498c9048978aa01e56d7fb53f4decb0783586b3353e0e7447c1"
+    },
+    {
+      "path": "internal/auth/keystore_test.go",
+      "sha256": "00f9752d871da7584ced8e62e11e0673aabc4ae1340ab3ce6c09881f8d8d02b1"
+    },
+    {
+      "path": "internal/cache/embeddings.go",
+      "sha256": "91177e4c31fc8c67c03086f021e607bad6247170c95c421a154195ef0742c966"
+    },
+    {
+      "path": "internal/cache/namespace.go",
+      "sha256": "5acd3968b0be7ea891840802e51a562ed0626b7daf2657f6f7cc7bf3030555d0"
+    },
+    {
+      "path": "internal/cache/semantic.go",
+      "sha256": "b46767e79bc2977cfbf62c74348b42b844af1d56c9bd2db65fddd8cd9b16b774"
+    },
+    {
+      "path": "internal/cache/semantic_integration_test.go",
+      "sha256": "f8c4bf0afa7a5cb19fb075fc75117e0f12840fbf93ed001b3c7af5f242f44cc0"
+    },
+    {
+      "path": "internal/cache/semantic_test.go",
+      "sha256": "aa2fc8bf5a4bcbdbc52cc5f7e79127dd556f0aa5294335c5e694ac7964598697"
+    },
+    {
+      "path": "internal/completion/completion.go",
+      "sha256": "e1df8fa1f398d5d03eb598e7e0eed90182b10187c374bc3374efe9dae6992d12"
+    },
+    {
+      "path": "internal/completion/completion_test.go",
+      "sha256": "175afbfb0a4aa7a4e9d9636b848ec086795fcf1aa9ae2b9d1d55792f9d041695"
+    },
+    {
+      "path": "internal/completion/input.go",
+      "sha256": "2d53149e63810f03d7bc3f16a56bf3500789ff517d78f0bd227736f41797ce59"
+    },
+    {
+      "path": "internal/completion/policy_integration_test.go",
+      "sha256": "da92bcf2ff057891af1579258bce7565f9d3dc8c14e02b965a46a0001d22b687"
+    },
+    {
+      "path": "internal/completion/stream.go",
+      "sha256": "7639092584ec5c021cc164711d315ba6b186f566fa686fc3e3c1845f56432883"
+    },
+    {
+      "path": "internal/completion/stream_test.go",
+      "sha256": "a8a3b9ed4128972b7b5c5af4609b72b591f531dc9903dcd1e861e38d5ce66fe3"
+    },
+    {
+      "path": "internal/evaluation/evaluation.go",
+      "sha256": "250a9049dbb4b4ca3f3dc546fc51d8d7c70b1ca6f459cc36bb6c42eb2a59aa8e"
+    },
+    {
+      "path": "internal/evaluation/evaluation_test.go",
+      "sha256": "155eda362410533723b9a12bd42a271a40620fe9602b8bede9dc559b0045379e"
+    },
+    {
+      "path": "internal/evidence/evidence.go",
+      "sha256": "b6b502e2365031ef8950a1679611ac7620b15cf48c00976ec55b4adbe8340c0d"
+    },
+    {
+      "path": "internal/evidence/evidence_test.go",
+      "sha256": "7708967af1649dab43dfafff86a5573ec29c9b8fdac33f6c8758e2a22848ea57"
+    },
+    {
+      "path": "internal/handler/abandoned_test.go",
+      "sha256": "558774856a067813e201212f586c9578fade54d86c4a4e377486aa780916e129"
+    },
+    {
+      "path": "internal/handler/chat.go",
+      "sha256": "0aed70260843be58d0ce725d96e42b850f172d895a53558963ebd5e48718f941"
+    },
+    {
+      "path": "internal/handler/chat_test.go",
+      "sha256": "b9e328ffcb1582f090a166fb28ce5a7fd71fa1cd19bf08525b0c05fe48e1747f"
+    },
+    {
+      "path": "internal/handler/endpoints_test.go",
+      "sha256": "c290a303e6ed167c52417289251da7b8fb2f908ae27a322d79f047035fdc6561"
+    },
+    {
+      "path": "internal/handler/limits.go",
+      "sha256": "b679438424a3dd5d708eabfedd7de93cb60e4f31cd9f885021c355ddffede887"
+    },
+    {
+      "path": "internal/handler/models.go",
+      "sha256": "c27177fb31e0ca54f9b81989a417b82332cf5dfc23f6a6a206c5a417079b99ca"
+    },
+    {
+      "path": "internal/handler/stream.go",
+      "sha256": "3bb192d76bf65d751c59b7cc1e462f5844bb7d2bb2b52f3caf9860c0e5e4b915"
+    },
+    {
+      "path": "internal/handler/usage.go",
+      "sha256": "3ac93467e6b6cb50c340a6c551015910f081a96871ab141bd53ecc58529e02c2"
+    },
+    {
+      "path": "internal/middleware/auth.go",
+      "sha256": "ed745311dff34685b5de908823c2de5bca9449a16f3b361da0c5b77ea8f06f8f"
+    },
+    {
+      "path": "internal/middleware/auth_test.go",
+      "sha256": "2c89d7e18f8343bdae8c1594d758e3f03e890b3fd23690e60a0c52d37ff52b01"
+    },
+    {
+      "path": "internal/middleware/chain.go",
+      "sha256": "31cb68fd98b94f78e1d5c9bf7686e20010480e0d5c58ad25154182bfefb66795"
+    },
+    {
+      "path": "internal/middleware/limits.go",
+      "sha256": "5e03294c79a53a44fb13890a62a563378f9769a2f9a66991a6db99a9aab001b4"
+    },
+    {
+      "path": "internal/middleware/ratelimit.go",
+      "sha256": "9afe21f1e15b3d2680ea76ab7303db0d67c0c3d3f7f9b6315811133b237768f4"
+    },
+    {
+      "path": "internal/middleware/ratelimit_test.go",
+      "sha256": "0396ef32ee769322d5ccff37c38cf3265f902f50eb672ee62027608e3ffa1cfe"
+    },
+    {
+      "path": "internal/observability/logger.go",
+      "sha256": "56665ec5f46bc8f7208cef40d6e688117af750b9458eabde748f07e697a48c6b"
+    },
+    {
+      "path": "internal/observability/tokens.go",
+      "sha256": "5cdd66515d5a3cde7c610ae344978d11dcf7decf42449a267026151258ac9533"
+    },
+    {
+      "path": "internal/observability/tokens_test.go",
+      "sha256": "dae411d73b4560b407e2bd20700ebe348f26c2224ffefc79db5d78dd9b1bddda"
+    },
+    {
+      "path": "internal/provider/openai.go",
+      "sha256": "14f62625b377fe36c289a444eacd15be5aca99231ad6f208b05f9938b6724628"
+    },
+    {
+      "path": "internal/provider/openai_test.go",
+      "sha256": "568cd49489f87ac37c504b593bc841cfa1c65d3bf02a0b62572246c97b814f8a"
+    },
+    {
+      "path": "internal/rag/rag.go",
+      "sha256": "2328f2961a352bba878bdbbaf84d32509f4e86319a8bb8d98250becdaa9abff4"
+    },
+    {
+      "path": "internal/rag/rag_test.go",
+      "sha256": "17ef18048eddda2e4ec1f5fbc3082a1ab5cbd5f382edd298d15d15b48ca48c37"
+    },
+    {
+      "path": "internal/ratelimit/limiter.go",
+      "sha256": "86884043cefcc0e02503ac513ec6e66ebd932b6785c85488daf9cc2d89bbd162"
+    },
+    {
+      "path": "internal/ratelimit/limiter_test.go",
+      "sha256": "deeb0665caeeac04767400e6c1f4ae73e6892bb79ece438d85370fea70bfcf18"
+    },
+    {
+      "path": "internal/ratelimit/memory.go",
+      "sha256": "066448910195e6bb1feb270b4300799fd8916ad5a3b2733c5176c78aecfcca5c"
+    },
+    {
+      "path": "internal/ratelimit/redis.go",
+      "sha256": "438ab4c43a31425de20e6c4b13012672bb4770b46b228b92259d4f7e27064368"
+    },
+    {
+      "path": "internal/ratelimit/redis_test.go",
+      "sha256": "a9d8e92f3fceaa8ff1ca6ba5235a5d578d31bf46eba17b4b9d6dac920eb055cc"
+    },
+    {
+      "path": "internal/ratelimit/store.go",
+      "sha256": "46dd8e8bd89e0379f4b20cddc9b10ad6d7ca9dffbc4984ecdac854e598db85d4"
+    },
+    {
+      "path": "internal/router/model.go",
+      "sha256": "e86c9017dba70a9e0843861663df17f87db5d91f36bf05f3aae949afbaced629"
+    },
+    {
+      "path": "internal/router/model_test.go",
+      "sha256": "65f8082a8f7d3171f25a52012696a62a9937cce952d8ccee6854d2abbd9ffa15"
+    },
+    {
+      "path": "internal/router/router.go",
+      "sha256": "ce92be927f155169093b9cfe4390acbbe1e21f69bc41d760469f304a242bc967"
+    },
+    {
+      "path": "internal/router/router_test.go",
+      "sha256": "702acfa351d84ad72fccfece1708e570afc5adafb0c0914ed8c86cadcd07f1a0"
+    },
+    {
+      "path": "internal/usage/tracker.go",
+      "sha256": "c145ffda940c97defeea9e59e493fcc20b8edb09df85b07af17e427f990ceb3f"
+    },
+    {
+      "path": "internal/usage/tracker_test.go",
+      "sha256": "c2f2b0556d7c41283783de65635b8cf3810609ff7aac982b013bb475499270b6"
+    },
+    {
+      "path": "main.go",
+      "sha256": "50cd094aa8916990dba2f4b4d17bef2a88f55b8fd135b8d5eb9427776406526d"
+    }
+  ],
+  "working_tree_changes": [
+    " M .github/workflows/ci.yml",
+    " M GLOSSARY.md",
+    " M README.md",
+    " M docs/ARCHITECTURE.md",
+    " M docs/ENGINEERING-NOTES.md",
+    " M docs/EVALUATION.md",
+    " M docs/RAG.md",
+    " M docs/ROADMAP.md",
+    " M docs/THREAT-MODEL.md",
+    " M docs/adr/0001-keyword-routing-instead-of-a-classifier.md",
+    " M docs/adr/0002-cache-on-meaning-not-exact-text.md",
+    " M docs/adr/0003-the-store-decides-the-rate-limit.md",
+    " M docs/adr/0004-millisecond-scores-in-the-lua-script.md",
+    " M docs/adr/0005-one-module-for-a-chat-request.md",
+    " M docs/adr/0006-estimate-and-bill-abandoned-streams.md",
+    " M docs/adr/0007-isolate-semantic-cache-by-tenant-and-model.md",
+    " M docs/adr/0008-portfolio-evidence-gates.md",
+    " M docs/adr/README.md",
+    " M internal/completion/completion.go",
+    " M internal/completion/completion_test.go",
+    " M internal/completion/stream.go",
+    " M internal/handler/chat_test.go",
+    " M internal/provider/openai.go",
+    " M internal/provider/openai_test.go",
+    " M internal/rag/rag.go",
+    " M internal/rag/rag_test.go",
+    "?? .archify/",
+    "?? docs/adr/0009-separate-gateway-policy-from-untrusted-input.md",
+    "?? internal/completion/input.go",
+    "?? internal/completion/policy_integration_test.go"
+  ]
+}

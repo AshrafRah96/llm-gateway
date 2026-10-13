@@ -1,52 +1,60 @@
 # Roadmap
 
-The project is intentionally small. This list prioritises risks rather than feature
-count.
+Prioritize remaining risks. Keep the gateway small.
 
-## Next: bound cost and work
+## Shipped
 
-- ~~Limit HTTP body and prompt size.~~
-- ~~Add endpoint-aware request deadlines.~~ Bounded upstream response reads remain.
-- ~~Cap concurrent requests and output tokens.~~
-- Add per-tenant token and spend budgets.
-- Load-test cancellation, quotas and graceful shutdown.
+- Body/prompt limits, request deadlines, concurrency caps, model output caps.
+- HMAC project keys; non-secret rate-limit and usage identity.
+- Project-filtered RAG; corpus-aware semantic-cache namespaces.
+- Fixed prompt policy, encoded references, separate question, policy-versioned cache.
+- One configured pre-output fallback at the same provider.
+- Shared JSON/SSE lifecycle; labelled partial-stream estimates; bounded settlement.
+- Opt-in real-provider smoke command and semantic-cache evaluator.
+- CI with Redis Stack and rejection of skipped integration tests.
 
-These controls bound individual requests; tenant token and spend budgets are the next
-meaningful cost-control gap.
+Shipped commands do not imply measured real-provider results. No evaluation or smoke report is committed yet.
 
-## Then: make identity and money auditable
+## Next: bound spend and work
 
-- ~~Replace plaintext client keys with keyed fingerprints.~~ Add rotation metadata.
-- ~~Stop placing raw client keys in rate-limit and usage key names.~~
-- Record money as integer minor units rather than `float64`.
-- Write idempotent usage events to durable storage and reconcile aggregates.
-- Separate disposable semantic-cache data from billing records.
+- Bound provider response reads.
+- Add project token/spend budgets.
+- Load-test cancellation, quotas, and graceful shutdown.
+- Keep individual request bounds; measure behavior under concurrent traffic.
 
-## Then: harden dependencies
+## Make identity and money auditable
 
-- Configure Redis ACL, authentication and TLS.
-- Remove public Redis and RedisInsight ports from production deployment examples.
-- Pin container versions and add persistence, backups and resource limits.
-- Add readiness checks for Redis Search and the provider path.
-- Add metrics, traces, correlation IDs and actionable alerts.
+- Add key rotation, expiry, and scoped administrator credentials.
+- Use integer monetary units instead of `float64`.
+- Persist idempotent usage events; reconcile aggregates and provider charges.
+- Separate disposable cache data from billing records.
+- Include or separately report embedding spend.
 
-## Then: modernise provider policy
+## Harden dependencies
 
-- Finish moving model prices and output limits into validated configuration.
-- Measure the configured one-shot transient failover policy against real provider
-  behaviour and `Retry-After` responses.
-- Capture provider request IDs and use a stable error taxonomy.
-- Add an opt-in real-provider contract smoke test.
+- Redis ACL, authentication, TLS, private ports.
+- Pinned container versions, persistence, backups, resource limits.
+- Redis Search/provider readiness checks.
+- Metrics, traces, request correlation, alerts.
 
-## AI quality work
+## Validate provider policy
 
-- Grow the semantic corpus from observed, privacy-reviewed prompt patterns.
-- Report precision and recall by domain and language.
-- Evaluate the abandoned-stream token estimate against provider invoices.
-- Measure routing quality and cost instead of relying on keywords indefinitely.
+- Configure model prices/output caps with IDs; keep `/models` aligned.
+- Measure one-shot failover and `Retry-After` behavior against the provider.
+- Capture provider request IDs; define stable error categories.
+- Fix fallback-header timing on grounded SSE responses.
+- Publish the existing smoke command's measured report.
 
-## Explicitly out of scope
+## Measure AI quality
 
-This portfolio project does not aim to become a full multi-provider product, admin
-portal or billing platform. New features should be added only when they demonstrate a
-specific engineering decision and can be verified.
+- Publish reproducible cache evaluation on the 40-case corpus.
+- Grow privacy-reviewed cases; report precision/recall by domain and language.
+- Evaluate token estimates against provider usage/invoices.
+- Measure keyword routing quality and cost.
+- Run real-model adversarial tests for direct and retrieved prompt injection.
+- Measure answer/cache poisoning risk before adding detection or output screening.
+
+## Scope
+
+No full multi-provider control plane, admin portal, or billing platform.
+Add work when it demonstrates a specific engineering decision with reproducible evidence.

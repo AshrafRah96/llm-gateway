@@ -1,104 +1,90 @@
 # Semantic-cache evaluation
 
-Semantic similarity is probabilistic. A unit test can prove tenant isolation and Redis
-mechanics, but it cannot prove that `0.95` is a safe threshold for real language.
+CI proves cache mechanics and namespace isolation. Real embeddings measure language classification.
+Neither proves that similarity `0.95` is universally safe.
 
-This project therefore separates two questions:
+## Corpus and targets
 
-1. **Does the cache enforce its rules?** Deterministic integration tests answer this in
-   CI.
-2. **Does the embedding threshold classify prompt pairs well?** The opt-in evaluator
-   measures this with real embeddings.
+[`evaluation/cases-v1.json`](evaluation/cases-v1.json): 40 labelled English pairs.
+Twenty should hit; twenty should miss. Both routing tiers appear.
+Hard negatives differ by country, operation, or delivery guarantee.
 
-## Corpus
+Targets: precision ≥95%, recall ≥80%. Results describe this small corpus, not production traffic.
+No measured evaluation or provider-smoke report is committed yet.
 
-[`evaluation/cases-v1.json`](evaluation/cases-v1.json) contains 40 labelled pairs:
+## Run
 
-- 20 equivalent questions that should hit;
-- 20 related but meaningfully different questions that should miss;
-- examples routed through both the cheap and powerful model tiers.
-
-Hard negatives differ by details such as country, operation or delivery guarantee. They
-are deliberately more useful than random unrelated prompts.
-
-The corpus is small and English-only. Results describe this corpus, not all production
-traffic.
-
-## Run it
-
-The evaluator makes paid calls to the OpenAI embeddings endpoint and requires Redis
-Stack. It is intentionally excluded from normal CI. Each run uses a unique cache
-namespace; use a disposable Redis instance when publishing a result.
+The evaluator makes paid OpenAI embedding calls and needs Redis Stack. Normal CI excludes it.
+Each run creates a unique cache namespace. Use disposable Redis for published measurements.
 
 ```bash
 docker run --rm -d --name llm-gateway-eval-redis \
   -p 6379:6379 redis/redis-stack-server:latest
 
 export OPENAI_API_KEY=sk-your-key
-go run ./cmd/cache-eval \
-  -json docs/evaluation/results-v1.json \
-  -markdown docs/evaluation/results-v1.md
-```
-
-Optional environment:
-
-```bash
 export REDIS_ADDR=localhost:6379
 export CACHE_TTL=24h
-```
-
-The default outputs are committed portfolio evidence:
-
-- `docs/evaluation/results-v1.json` contains provenance, every case, and all metrics.
-- `docs/evaluation/results-v1.md` contains the human-readable summary and case table.
-
-Paths and corpus can be overridden:
-
-```bash
 go run ./cmd/cache-eval \
   -dataset docs/evaluation/cases-v1.json \
-  -json tmp/results.json \
-  -markdown tmp/results.md \
-  -run-id 20261011T120000Z
+  -json docs/evaluation/results-v1.json \
+  -markdown docs/evaluation/results-v1.md \
+  -environment 'local Redis Stack; describe host and region'
+
+docker stop llm-gateway-eval-redis
 ```
+
+Use a free port if another Redis already owns 6379. Optional Redis/cache settings default
+to `localhost:6379` and `24h`. Output flags may point elsewhere, such as `tmp/results.json`
+and `tmp/results.md`. The command generates its run ID; no `-run-id` flag exists.
+Its runtime context has a 5-minute budget.
+
+Expected outputs, created by a run:
+
+- `docs/evaluation/results-v1.json`: provenance, cases, metrics.
+- `docs/evaluation/results-v1.md`: summary, metadata, case table.
+
+The command can overwrite existing output paths. Choose new paths to preserve prior runs.
+Do not link to these reports or claim measured numbers before they exist.
 
 ## Metrics
 
-- **Precision:** of all cache hits, how many were genuinely equivalent?
-- **Recall:** of all equivalent pairs, how many were found?
-- **Cache hit rate:** how often the lookup avoided a completion in this simulation.
-- **p50/p95 latency:** median and tail lookup time, including the embedding request.
+| Metric | Meaning |
+|---|---|
+| Precision | Equivalent pairs among cache hits |
+| Recall | Hits among equivalent pairs |
+| Cache hit rate | Fraction avoiding simulated chat generation |
+| p50/p95 lookup latency | Median/tail latency, including embedding request |
 
-The command exits non-zero when precision is below 95% or recall is below 80%, after
-writing the result files. Both gates are fixed before running the corpus so a threshold
-cannot be tuned after seeing the result.
+After a completed evaluation, reports are written before target failures return non-zero.
+The fixed gates prevent retroactively redefining success.
 
-## Publishing results
+## Publish
 
-No benchmark number is committed yet because the evaluation has not been run in a
-controlled environment. When publishing:
+Keep corpus version/checksum, threshold, embedding model, run ID, source commit, dirty-state
+flag, runtime, Redis/Search versions, deployment description, and raw results together.
+Publish failures as well as passes. Keep labels fixed when tuning thresholds.
 
-1. keep the corpus version, checksum, embedding model, threshold, source commit and raw JSON result together;
-2. record runtime and Redis setup;
-3. publish failed targets as well as successful ones;
-4. tune the threshold without changing labels to flatter the result;
-5. do not describe this small corpus as production traffic.
-
-This makes a missing result honest and a future result reproducible.
+The evaluator exercises semantic-cache classification in its own namespace. It does not
+measure full gateway RAG, prompt-injection resistance, or production answer quality.
 
 ## Real-provider smoke run
 
-The smoke command is opt-in and sends a small, bounded set of requests through a running
-gateway. Start Redis Stack and the gateway with a real `OPENAI_API_KEY`, provision a
-project key, then run:
+Start Redis Stack and the gateway with a real provider key and pepper. Provision a project key.
+The command makes paid chat/embedding calls through the gateway.
 
 ```bash
 export SMOKE_API_KEY=the-provisioned-project-key
 go run ./cmd/provider-smoke \
+  -gateway http://localhost:8080 \
   -json docs/smoke/provider-v1.json \
   -markdown docs/smoke/provider-v1.md
 ```
 
-It checks a JSON completion, a repeated cache hit, a completed stream, a cancelled
-stream, and the resulting usage settlement. Reports contain no API key or response
-content. The command exits non-zero when any check fails and writes its report first.
+Checks: usage baseline, JSON completion, repeated cache hit, completed SSE, cancelled SSE,
+and usage settlement. Reports omit API keys and response content.
+`-prompt` overrides the JSON/cache question. Smoke run IDs are generated automatically.
+The command writes the report before returning non-zero for a failed check.
+Smoke output paths can overwrite earlier reports; choose distinct paths to preserve prior runs.
+
+Use a fresh provisioned key and avoid concurrent traffic during the run. Protected status
+endpoints also consume the 10-request/minute quota. The command has no bypass for rate limits.

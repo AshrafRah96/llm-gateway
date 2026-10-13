@@ -57,7 +57,7 @@ jobs:
         # A skipped test proves nothing. If the Redis service failed to come up, the
         # suite would still be green, so fail loudly instead.
         run: |
-          if go test -v -count=1 ./internal/cache/ ./internal/ratelimit/ ./internal/auth/ ./internal/usage/ ./internal/rag/ | grep -q "^--- SKIP"; then
+          if go test -v -count=1 ./internal/cache/ ./internal/ratelimit/ ./internal/auth/ ./internal/usage/ ./internal/rag/ ./internal/completion/ | grep -q "^--- SKIP"; then
             echo "Redis-backed tests were skipped; the service is not reachable"
             exit 1
           fi

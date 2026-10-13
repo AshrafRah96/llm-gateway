@@ -25,14 +25,14 @@ type fakeProvider struct {
 	err    error
 }
 
-func (p *fakeProvider) Complete(ctx context.Context, prompt string, m router.Model) ([]byte, int, error) {
+func (p *fakeProvider) Complete(ctx context.Context, input completion.ProviderInput, m router.Model) ([]byte, int, error) {
 	if p.err != nil {
 		return nil, 0, p.err
 	}
 	return p.body, p.status, nil
 }
 
-func (p *fakeProvider) Stream(ctx context.Context, prompt string, m router.Model) (completion.ProviderStream, int, error) {
+func (p *fakeProvider) Stream(ctx context.Context, input completion.ProviderInput, m router.Model) (completion.ProviderStream, int, error) {
 	if p.err != nil {
 		return nil, 0, p.err
 	}

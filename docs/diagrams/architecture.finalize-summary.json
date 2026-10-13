@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.json",
+    "sha256": "a850c2a90a0e1f97a65a14042c565f09594500a527191c6eb79e7c9121270219",
+    "bytes": 15252
+  },
+  "artifact": {
+    "path": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.html",
+    "sha256": "ddd8b791d553ab2e437b5db4f8160523ef0d905bb9ac2d75de6c4c129a4e2409",
+    "bytes": 776997
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.finalize.json",
+    "summaryReceipt": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.finalize-summary.json",
+    "browserCheckReceipt": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.0.1",
+    "availableVersion": "3.0.1",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-13T15:38:01.479Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 1781
+}

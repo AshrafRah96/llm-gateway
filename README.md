@@ -2,155 +2,156 @@
 
 [![CI](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml)
 
-An OpenAI gateway project about the engineering around an LLM call:
-distributed quotas, semantic reuse, streaming cancellation and auditable cost tracking.
+Go gateway for OpenAI: project authentication, Redis quotas, project RAG, semantic reuse,
+JSON/SSE delivery, and project usage totals.
 
-It also includes a deliberately scoped, [project-isolated RAG flow](docs/RAG.md):
-operator-reviewed Markdown/text is retrieved only for the authenticated project's key.
+Reference implementation and portfolio project. See [implemented controls](docs/THREAT-MODEL.md)
+and [remaining work](docs/ROADMAP.md).
 
-Your app sends a prompt here instead of to OpenAI. The gateway checks the caller's
-API key, makes sure they aren't sending too many requests, looks for a cached answer,
-picks a model, calls OpenAI, and records what it cost.
+## Architecture
 
-> **Project status:** a production-minded reference implementation and CV project, not
-> a production-ready commercial gateway. Implemented controls and remaining risks are
-> separated in the [threat model](docs/THREAT-MODEL.md) and
-> [roadmap](docs/ROADMAP.md).
+[![LLM Gateway architecture: admission, completion, retrieval, prompt boundaries, provider, and Redis state](docs/diagrams/architecture.svg)](docs/diagrams/architecture.svg)
 
-### Why this is worth reviewing
+[Interactive Archify diagram](docs/diagrams/architecture.html)
+· [Architecture details](docs/ARCHITECTURE.md)
+· [Diagram source](docs/diagrams/architecture.json)
 
-| Engineering problem | What this project demonstrates | Evidence |
+The diagram includes the applied prompt-injection defenses. Its source evidence uses a
+frozen local snapshot of the current code. Download the HTML and open it in a browser;
+GitHub displays the SVG but does not run the interactive viewer.
+
+## Request path
+
+1. Authenticate `X-API-Key`; derive project and key identity.
+2. Apply key quota, global/project concurrency caps, body limit, and deadline.
+3. Route the original question by length and keywords.
+4. Retrieve project-filtered reference material.
+5. Search cache by project, primary routed model, corpus revision, schema, and prompt policy.
+6. On a miss, send fixed system policy, encoded references, and separate user question to OpenAI.
+7. Settle usage and logs. Cache complete successful answers. Return JSON or SSE.
+
+Cache hits skip chat generation and usage increments. They still make embedding calls.
+Retrieval/cache errors allow an ungrounded completion or cache miss. Authentication/quota errors reject the request.
+
+## Behavior
+
+| Capability | Rule | Evidence |
 |---|---|---|
-| Distributed rate limits | One atomic Redis Lua decision; rejected requests do not consume quota | [ADR-0003](docs/adr/0003-the-store-decides-the-rate-limit.md), [bug write-up](docs/ENGINEERING-NOTES.md#1-the-rate-limiter-that-allowed-twelve-times-its-limit) |
-| Interrupted SSE streams | Cancellation stops upstream work while partial usage is estimated and labelled | [ADR-0006](docs/adr/0006-estimate-and-bill-abandoned-streams.md), [regression test](internal/handler/abandoned_test.go) |
-| Safe semantic reuse | Answers are reused only inside the same tenant, routed model and cache schema | [architecture](docs/ARCHITECTURE.md), [integration tests](internal/cache/semantic_integration_test.go) |
+| Quotas | Default 10 quota approvals per key per sliding minute; Redis Lua makes one atomic decision | [ADR-0003](docs/adr/0003-the-store-decides-the-rate-limit.md) |
+| Routing | Over 500 **bytes**, or a complexity keyword, selects the powerful tier | [ADR-0001](docs/adr/0001-keyword-routing-instead-of-a-classifier.md) |
+| RAG | Reviewed text only; authenticated project filter; up to four chunks at similarity ≥0.80 | [RAG](docs/RAG.md) |
+| Semantic cache | Similarity ≥0.95; namespace filters precede ranking; default TTL 24h | [ADR-0007](docs/adr/0007-isolate-semantic-cache-by-tenant-and-model.md) |
+| Prompt boundaries | One fixed system policy; references and question remain user data; shared JSON/SSE/fallback builder | [ADR-0009](docs/adr/0009-separate-gateway-policy-from-untrusted-input.md) |
+| Failover | One distinct configured fallback on transport errors, HTTP 408/429/5xx, before output | [Architecture](docs/ARCHITECTURE.md) |
+| Usage | Project totals for completion requests, tokens, USD cost, and estimated requests | [ADR-0006](docs/adr/0006-estimate-and-bill-abandoned-streams.md) |
 
-The cache-quality claims are measurable rather than assumed. The repository includes a
-[versioned 40-case corpus](docs/evaluation/cases-v1.json) and an opt-in evaluator for
-precision, recall, hit rate and lookup latency. The measured report is published only
-after a real-embedding run; see [evaluation](docs/EVALUATION.md) for the exact command.
+Default routes: `gpt-3.5-turbo` and `gpt-4`. Fallback defaults equal the primary model,
+so retry occurs only when a distinct fallback is configured. Routing makes no classifier call.
 
-**Stack:** Go, Redis/Redis Search, Lua, Server-Sent Events, Docker and GitHub Actions.
+JSON and SSE share `internal/completion`. OpenAI wire framing stays in `internal/provider`;
+HTTP decoding and outbound SSE framing stay in `internal/handler`.
 
-### Current request flow
+## Run
 
-```text
-client (X-API-Key)
-  |
-  v
-HMAC project authentication -- invalid --> 401
-  |
-  v
-rate limit + global/project concurrency caps -- full --> 429 / 503
-  |
-  v
-project-filtered RAG retrieval -- no match --> ungrounded request
-  |
-  v
-deterministic route: primary model, one same-provider fallback
-  |
-  v
-project + model + corpus-revision semantic cache -- hit --> response
-  |
-  v
-OpenAI completion / stream --> usage + cache complete success --> response
+Docker Compose starts the gateway and Redis Stack. Go 1.25+ is needed for operator commands.
+
+```bash
+export OPENAI_API_KEY=sk-your-key
+export API_KEY_PEPPER='a-long-random-secret'
+export REDIS_ADDR=localhost:6379
+docker compose up -d --build
+export PROJECT_API_KEY="$(go run ./cmd/project-key -project demo)"
 ```
 
-## What it does
+The key command prints the raw key once. Redis stores its HMAC fingerprint and project binding.
+Keep the pepper stable and store the key securely.
 
-**Caches answers to similar questions.** "What is the capital of France?" and
-"France's capital city?" are different strings but mean the same thing. The gateway
-turns each prompt into a vector and looks for a stored answer that is close enough
-(95% similar). A hit costs nothing and returns immediately. Searches are filtered by
-a fingerprint of the caller's key, routed model and schema version; entries expire
-after 24 hours by default.
+Gateway: port 8080. Redis: 6379. RedisInsight: 8001.
+Compose exposes Redis without ACL/TLS and declares no persistent volume. Use it for local development.
 
-**Picks a cheaper model when it can.** Short, simple prompts go to `gpt-3.5-turbo`.
-Prompts over 500 characters, or ones containing words like "analyze", "compare" or
-"debug", go to `gpt-4`. This is a keyword check, not another model call, so it adds
-no delay and no cost.
+Direct Go startup, after starting Redis Stack and setting the same environment:
 
-**Limits how often each key can call.** 10 requests per minute by default, counted
-over a sliding window. Requests that get refused do not count against the limit, so
-a caller that keeps retrying still recovers as soon as its earlier requests age out.
-
-**Tracks spend per API key.** Every request records its tokens and its cost in USD.
-Streamed requests are counted too, including ones the caller abandons — see below.
-
-**Streams when you want it to.** `/chat/stream` emits stable content-delta
-server-sent events. The OpenAI adapter decodes the upstream wire format first, so
-provider-specific framing does not leak into completion policy. Streamed answers are
-cached and billed exactly like normal ones.
-
-## How a request flows
-
-```text
-your app
-   │  X-API-Key
-   ▼
-┌──────────────┐
-│ is the key   │──── no ──▶ 401
-│ valid?       │
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ under the    │──── no ──▶ 429 + Retry-After
-│ rate limit?  │
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ pick a model │
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ similar      │──── yes ─▶ return the cached answer (X-Cache: HIT)
-│ prompt seen  │
-│ for tenant + │
-│ model?       │
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ call OpenAI  │
-└──────┬───────┘
-       ▼
-  record cost, cache the answer, return it
+```bash
+go run .
 ```
+
+Plain Redis cannot serve the cache/RAG vector indexes. Redis connectivity and index creation
+share a 10s startup budget. Shutdown has a 30s budget.
+
+Import reviewed UTF-8 text or Markdown:
+
+```bash
+go run ./cmd/rag-import -project demo -file docs/ARCHITECTURE.md
+```
+
+Standalone Docker image:
+
+```bash
+docker build -t llm-gateway .
+docker run -p 8080:8080 \
+  -e OPENAI_API_KEY \
+  -e API_KEY_PEPPER \
+  -e REDIS_ADDR=host.docker.internal:6379 \
+  llm-gateway
+```
+
+`host.docker.internal` assumes Docker Desktop. Use the Redis host reachable from your container.
 
 ## Endpoints
 
-| Method | Path           | Needs a key | What it does                          |
-|--------|----------------|-------------|---------------------------------------|
-| POST   | `/chat`        | yes         | Send a prompt, get an answer          |
-| POST   | `/chat/stream` | yes         | Same, streamed as it arrives          |
-| GET    | `/usage`       | yes         | Tokens and cost so far for your key   |
-| GET    | `/limits`      | yes         | How many requests you have left       |
-| GET    | `/models`      | no          | Which models exist and what they cost |
-| GET    | `/health`      | no          | Is the server up                      |
+| Method | Path | Key required | Result |
+|---|---|---|---|
+| POST | `/chat` | yes | JSON completion with additive grounding metadata on success |
+| POST | `/chat/stream` | yes | Content-delta SSE; initial `sources` event when grounded |
+| GET | `/usage` | yes | Project completion usage totals |
+| GET | `/limits` | yes | Current key's quota status |
+| GET | `/models` | no | Compiled model catalogue and prices |
+| GET | `/health` | no | Liveness response; not dependency readiness |
 
-Send your key in the `X-API-Key` header.
+All protected endpoints consume quota and pass request limits, including `/usage` and `/limits`.
+Quota approval happens before handler validation and concurrency checks; later rejection can still consume a slot.
+Requests contain only `{"prompt":"..."}`. Empty prompts, unknown fields, and oversized prompts are rejected.
 
-### Response headers
+```bash
+curl -i http://localhost:8080/chat \
+  -H 'Content-Type: application/json' \
+  -H "X-API-Key: $PROJECT_API_KEY" \
+  -d '{"prompt":"What is the capital of France?"}'
 
-- `X-Cache` — `HIT` if the answer came from the cache, `MISS` if it came from OpenAI
-- `X-Model` — which model was called (not set on a cache hit because this request made
-  no model call)
-- `Retry-After` — on a 429, how many seconds to wait
+curl -N http://localhost:8080/chat/stream \
+  -H 'Content-Type: application/json' \
+  -H "X-API-Key: $PROJECT_API_KEY" \
+  -d '{"prompt":"Explain quantum computing"}'
 
-If OpenAI returns an error, the gateway passes its status code through unchanged, so a
-429 from OpenAI reaches you as a 429. Both `/chat` and `/chat/stream` behave the same way.
+curl http://localhost:8080/usage -H "X-API-Key: $PROJECT_API_KEY"
+```
 
-### Abandoned streams
+Repeating the first prompt can hit the cache. Reworded prompts hit only when similarity
+and namespace checks pass.
 
-If you stop reading a stream part way through, the gateway drops the connection to
-OpenAI, which stops generating. That saves money, but it also means OpenAI never sends
-its final token count — it arrives at the very end or not at all.
+Response headers:
 
-Those tokens were still used. Your prompt was charged in full, and so was whatever got
-generated before the cut. Recording nothing would quietly write off a real cost, so the
-gateway estimates instead, from your prompt and the part of the answer it received.
+- `X-Cache`: `HIT` or `MISS`.
+- `X-Model`: model used on a miss; absent on hits.
+- `X-RAG-Grounded`: `true` or `false` when retrieval is enabled.
+- `X-Model-Fallback`: fallback marker. Grounded SSE may flush headers before this marker is set.
+- `Retry-After`: integer seconds on gateway quota rejection.
 
-Estimates are approximate, and they are labelled. `/usage` reports how many of your
-requests were estimated:
+Provider error statuses propagate after any configured fallback. Transport errors become 502.
+
+## Streaming settlement
+
+Provider exhaustion settles usage, logs, and cache. Deferred `Close` uses the same
+idempotent path when the caller leaves early.
+
+Cancellation closes upstream work. Without final provider usage, estimate input from
+system policy, encoded references, and question; estimate output from received content.
+The estimate uses roughly four bytes per token and excludes exact chat-framing overhead.
+It is unreconciled and can undercount non-English text.
+
+Settlement outlives request cancellation but stops after 5s. Partial streams are never cached.
+Measured provider usage takes precedence. Estimates appear as `"estimated": true` in logs
+and increment `estimated_requests` in `/usage`:
 
 ```json
 {
@@ -162,207 +163,86 @@ requests were estimated:
 }
 ```
 
-The request log marks them too, with `"estimated": true`. If a charge looks wrong, that
-tells you whether the number was measured or inferred.
+Usage is best effort, uses floating-point USD, and excludes embedding spend.
 
-Normal streams settle their cache, usage and log records as soon as the provider
-finishes. The handler's deferred close uses the same idempotent settlement path only
-when a caller disconnects before exhaustion.
+## Settings
 
-## Running it
+| Variable | Default | Meaning |
+|---|---|---|
+| `OPENAI_API_KEY` | required | Provider key |
+| `API_KEY_PEPPER` | required | Project-key HMAC secret |
+| `REDIS_ADDR` | `localhost:6379` | Redis Stack address |
+| `CACHE_TTL` | `24h` | Response-cache lifetime |
+| `REQUEST_TIMEOUT` | `60s` | Request context deadline |
+| `MAX_REQUEST_BODY_BYTES` | `65536` | JSON body limit |
+| `MAX_CONCURRENT_REQUESTS` | `16` | In-flight cap per gateway process |
+| `MAX_CONCURRENT_PER_PROJECT` | `4` | Project in-flight cap per gateway process |
+| `CHEAP_MODEL` | `gpt-3.5-turbo` | Simple-question model ID |
+| `POWERFUL_MODEL` | `gpt-4` | Complex-question model ID |
+| `CHEAP_FALLBACK_MODEL` | cheap primary ID | Simple-tier fallback ID |
+| `POWERFUL_FALLBACK_MODEL` | powerful primary ID | Complex-tier fallback ID |
 
-The quickest way is compose, which brings up redis-stack alongside the gateway:
+Prompt limit: 32768 bytes. Model prices, output caps, quota defaults, and similarity thresholds
+remain compiled constants. Model-ID overrides inherit the tier's compiled prices/caps;
+`/models` still shows the compiled catalogue. Validate overrides before real billing.
 
-```bash
-export OPENAI_API_KEY=sk-your-key
-docker compose up
-```
+Compose passes the provider key, pepper, Redis address, and cache TTL. Add other settings
+to Compose or run directly when overriding them. `internal/application` validates configuration
+and owns Redis resources.
 
-The server listens on port 8080. RedisInsight is on 8001 if you want to look at what
-got cached.
-
-To run it directly you need Go 1.25+, an OpenAI key, and Redis:
-
-```bash
-git clone https://github.com/ashrafrah96/llm-gateway
-cd llm-gateway
-export OPENAI_API_KEY=sk-your-key
-export REDIS_ADDR=localhost:6379
-go run main.go
-```
-
-Use the redis-stack image rather than plain Redis. The cache needs vector search
-commands that only the stack has, and the gateway will not start without them.
-Everything else works on plain Redis.
-
-### Provisioning a project key
-
-Set a stable deployment secret, then generate a key bound to one project. Redis stores
-only its HMAC fingerprint; the command prints the raw key once.
-
-```bash
-export API_KEY_PEPPER='a-long-random-secret'
-go run ./cmd/project-key -project demo
-```
-
-Import reviewed project documents with `go run ./cmd/rag-import -project demo -file
-docs/example.md`. See [RAG](docs/RAG.md) for the complete workflow and isolation model.
-
-### Docker
-
-```bash
-docker build -t llm-gateway .
-docker run -p 8080:8080 \
-  -e OPENAI_API_KEY=sk-your-key \
-  -e API_KEY_PEPPER=a-long-random-secret \
-  -e REDIS_ADDR=host.docker.internal:6379 \
-  llm-gateway
-```
-
-### Settings
-
-| Variable         | What it is               | Default          |
-|------------------|--------------------------|------------------|
-| `OPENAI_API_KEY` | Your OpenAI key (needed) | —                |
-| `REDIS_ADDR`     | Where Redis is           | `localhost:6379` |
-| `CACHE_TTL`      | How long answers remain reusable | `24h` |
-| `API_KEY_PEPPER` | Secret used to fingerprint project keys (required) | â€” |
-| `REQUEST_TIMEOUT` | Gateway request deadline | `60s` |
-| `MAX_REQUEST_BODY_BYTES` | Maximum JSON request body | `65536` |
-| `MAX_CONCURRENT_REQUESTS` | Global in-flight request cap | `16` |
-| `MAX_CONCURRENT_PER_PROJECT` | Per-project in-flight cap | `4` |
-
-`internal/application` validates these values before constructing the adapter graph.
-Redis connectivity and semantic-cache index creation share a bounded startup context,
-so a broken dependency cannot leave startup waiting forever.
-
-## Trying it out
-
-```bash
-# ask something
-curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: some-secret-key" \
-  -d '{"prompt": "What is the capital of France?"}'
-
-# ask it a different way — this one should come back as a cache hit
-curl -i -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: some-secret-key" \
-  -d '{"prompt": "Which city is the capital of France?"}'
-
-# stream an answer
-curl -X POST http://localhost:8080/chat/stream \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: some-secret-key" \
-  -d '{"prompt": "Explain quantum computing"}'
-
-# see what you have spent
-curl http://localhost:8080/usage -H "X-API-Key: some-secret-key"
-```
-
-## Running the tests
+## Verify
 
 ```bash
 go test ./...
 ```
 
-Most tests use fakes and need nothing running. The ones covering Redis skip themselves
-when no Redis is reachable, so to run everything:
+Redis-backed tests skip when Redis/Search is unavailable. Run all checks with Redis Stack:
 
 ```bash
-docker run -d -p 6379:6379 redis/redis-stack-server:latest
-REDIS_ADDR=localhost:6379 go test -race ./...
+docker run --rm -d --name llm-gateway-test-redis \
+  -p 6379:6379 redis/redis-stack-server:latest
+go build ./...
+go vet ./...
+REDIS_ADDR=localhost:6379 go test -race -count=1 ./...
+docker stop llm-gateway-test-redis
 ```
 
-CI runs Redis Stack and fails the build if Redis-backed tests skip. A skipped test is
-how one of the bugs in
-[docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md) survived as long as it did.
+Use a free port or an existing Redis Stack instance if Compose already owns 6379.
+CI builds, vets, checks formatting, runs race tests, and rejects skipped Redis-backed tests.
 
-The real-embedding evaluation is separate from CI because it makes paid OpenAI calls.
-The committed [evaluation report](docs/evaluation/results-v1.md) records the corpus,
-threshold, precision, recall and lookup latency. Follow [docs/EVALUATION.md](docs/EVALUATION.md)
-to reproduce it. The opt-in [real-provider smoke report](docs/smoke/provider-v1.md)
-covers the gateway's JSON, cache, stream, cancellation and usage paths.
+[The evaluator](docs/EVALUATION.md) measures a committed 40-case English corpus with paid embeddings.
+Targets: precision ≥95%, recall ≥80%. The opt-in smoke command checks real JSON, cache,
+SSE, cancellation, and usage paths. No measured evaluation or smoke report is committed yet.
 
-## Reviewing this
+## Code map
 
-If you are reading this to judge the code rather than to use it, these are the parts
-worth your time.
+| Package | Responsibility |
+|---|---|
+| `internal/application` | Configuration, composition, owned resources |
+| `internal/auth` | Project-key fingerprints and lookup |
+| `internal/middleware` | Authentication, quotas, body/deadline/concurrency limits |
+| `internal/handler` | HTTP decoding, JSON, outbound SSE, read endpoints |
+| `internal/completion` | Shared lifecycle, trusted prompt builder, settlement |
+| `internal/provider` | OpenAI HTTP and provider-neutral SSE events |
+| `internal/router` | Model catalogue, pricing, deterministic route |
+| `internal/rag` | Reviewed document ingestion and project retrieval |
+| `internal/cache` | Embeddings, semantic lookup, response storage |
+| `internal/ratelimit` | Redis/in-memory sliding-window stores |
+| `internal/usage` | Project token/cost totals |
+| `internal/observability` | Token parsing and structured request logs |
+| `internal/evaluation` | Corpus validation and classification metrics |
+| `internal/evidence` | Evaluation provenance and report writes |
 
-Start with [internal/provider/openai.go](internal/provider/openai.go), where OpenAI's
-SSE wire format becomes provider-neutral content, usage and completion events. Then read
-[internal/completion/stream.go](internal/completion/stream.go), which applies caching
-and billing policy without knowing OpenAI's JSON framing.
+Operator commands: `project-key`, `rag-import`, `cache-eval`, `provider-smoke` under `cmd/`.
+Review [provider events](internal/provider/openai.go), [settlement](internal/completion/stream.go),
+[prompt boundaries](internal/completion/input.go), and [atomic quota decisions](internal/ratelimit/redis.go).
 
-Then [internal/ratelimit/redis.go](internal/ratelimit/redis.go), specifically the Lua
-script and the comment explaining why the timestamps are milliseconds. That comment is
-the fix for a bug that let roughly twelve times the configured rate through.
+## Limits and decisions
 
-[docs/adr/](docs/adr/) has the decisions and what was rejected.
-[docs/ENGINEERING-NOTES.md](docs/ENGINEERING-NOTES.md) writes up the two real bugs: how
-they were found, why the tests missed them, and what pins them now. That is probably the
-most useful thing here.
+- Structural prompt defenses reduce risk; no classifier, phrase blocklist, or output screening exists.
+- Payload tests prove message boundaries, not real-model attack resistance.
+- Semantic quality and keyword routing remain corpus/traffic dependent.
+- Spend budgets, durable accounting, key rotation, and production Redis hardening remain open.
 
-For the tests, [internal/handler/abandoned_test.go](internal/handler/abandoned_test.go)
-is the one I would look at. It cancels a request mid stream against a local slow HTTP
-provider and checks the caller still gets billed.
-
-## Known limitations
-
-Things that are not done, so you do not have to go looking for them.
-
-**The automated provider tests use local fakes.** The opt-in smoke command records a
-separate run against real OpenAI; it is intentionally excluded from CI because it needs
-a real key and incurs provider cost.
-
-**The token estimate is unreconciled.** Abandoned streams are billed on a rough four
-bytes per token. Nobody has checked that against an actual OpenAI invoice, and it reads
-low for non-English text.
-
-**Semantic similarity is corpus-dependent.** The 0.95 threshold is measured against the
-committed corpus in the evaluation report. That result describes the corpus, not every
-real prompt pair or production traffic.
-
-**The routing keyword list is a guess.** It has never been checked against real traffic
-to see how often it picks wrong.
-
-**Configuration is deliberately small.** Rate limits, the cache similarity threshold
-and model prices remain compile-time constants. Cache lifetime is configurable.
-
-## How the code is laid out
-
-| Package                  | What lives there                                   |
-|--------------------------|----------------------------------------------------|
-| `internal/application`   | Configuration, concrete composition and owned resources |
-| `internal/completion`    | What a chat request does, start to finish          |
-| `internal/handler`       | HTTP: reads the request, writes the response       |
-| `internal/middleware`    | Key checking and rate limiting                     |
-| `internal/provider`      | Talking to OpenAI                                  |
-| `internal/router`        | The model list, their prices, and which one to use |
-| `internal/cache`         | Prompt embeddings and the vector lookup            |
-| `internal/ratelimit`     | The sliding window, in Redis or in memory          |
-| `internal/usage`         | Per-key token and cost totals                      |
-| `internal/observability` | Request logging and token parsing                  |
-
-Both `/chat` and `/chat/stream` go through `internal/completion`. That is deliberate:
-when the two had their own copies of the logic, the streaming one quietly stopped
-caching and billing, and nobody noticed.
-
-## Why it works this way
-
-The decisions with a real tradeoff behind them are written up in [docs/adr/](docs/adr/),
-including what got rejected. The short version:
-
-**Sliding window rate limiting.** A fixed window lets someone send a full window's
-worth of requests at the end of one window and again at the start of the next. A
-sliding window spreads it out.
-
-**Cache on meaning, not exact text.** Exact-match caching misses anything reworded,
-which is most of what people actually send.
-
-**Keyword routing instead of a classifier.** Asking a model which model to use costs
-a call and adds delay. Checking length and a word list is good enough and free.
-
-**One place to add a model.** A model's id, description and price live together in
-`internal/router`. Add one there and billing, routing and `/models` all pick it up.
+[Decision records](docs/adr/README.md) preserve tradeoffs.
+[Engineering notes](docs/ENGINEERING-NOTES.md) explain the quota and streaming billing regressions.

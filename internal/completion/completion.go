@@ -17,8 +17,8 @@ import (
 )
 
 type Provider interface {
-	Complete(ctx context.Context, prompt string, model router.Model) ([]byte, int, error)
-	Stream(ctx context.Context, prompt string, model router.Model) (ProviderStream, int, error)
+	Complete(ctx context.Context, input ProviderInput, model router.Model) ([]byte, int, error)
+	Stream(ctx context.Context, input ProviderInput, model router.Model) (ProviderStream, int, error)
 }
 
 type ProviderUsage struct {
@@ -71,7 +71,7 @@ type Source struct {
 }
 
 type Retrieval struct {
-	Prompt        string
+	References    []Reference
 	CorpusVersion string
 	Sources       []Source
 }
@@ -106,6 +106,7 @@ type lifecycle struct {
 	completion   *Completion
 	ctx          context.Context
 	req          Request
+	input        ProviderInput
 	model        router.Model
 	fallback     router.Model
 	failover     bool
@@ -131,6 +132,7 @@ func (c *Completion) begin(ctx context.Context, req Request) *lifecycle {
 		completion: c,
 		ctx:        ctx,
 		req:        req,
+		input:      ProviderInput{Question: req.Prompt},
 		model:      decision.Primary,
 		fallback:   decision.Fallback,
 		started:    time.Now(),
@@ -144,9 +146,7 @@ func (c *Completion) begin(ctx context.Context, req Request) *lifecycle {
 			l.cacheVersion = retrieval.CorpusVersion
 			l.sources = retrieval.Sources
 			l.grounded = len(retrieval.Sources) > 0
-			if retrieval.Prompt != "" {
-				l.req.Prompt = retrieval.Prompt
-			}
+			l.input.References = retrieval.References
 		}
 	}
 
@@ -155,6 +155,7 @@ func (c *Completion) begin(ctx context.Context, req Request) *lifecycle {
 		project = req.APIKey
 	}
 	namespace := cache.NewProjectNamespace(project, l.model.ID, l.cacheVersion)
+	namespace.Version += ":" + promptPolicyVersion
 	attempt, err := c.cache.Begin(ctx, namespace, req.Prompt)
 	if err != nil {
 		log.Printf("cache error: %v", err)
@@ -209,10 +210,10 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 		return Response{Body: entry.Response, Status: entry.Status, CacheHit: true, Grounded: l.grounded, Sources: l.sources, RAGEnabled: l.ragEnabled}, nil
 	}
 
-	body, status, err := c.provider.Complete(ctx, l.req.Prompt, l.model)
+	body, status, err := c.provider.Complete(ctx, l.input, l.model)
 	if shouldFailover(err, status) && l.fallback.ID != "" && l.fallback.ID != l.model.ID {
 		l.failover = true
-		body, status, err = c.provider.Complete(ctx, l.req.Prompt, l.fallback)
+		body, status, err = c.provider.Complete(ctx, l.input, l.fallback)
 		if err == nil {
 			l.model = l.fallback
 		}

@@ -11,6 +11,7 @@ bin/
 build/
 dist/
 .cache/
+.archify/
 
 # Go workspace file
 go.work

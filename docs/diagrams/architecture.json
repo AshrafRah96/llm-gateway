@@ -1,0 +1,530 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "LLM Gateway \u00b7 Codebase Architecture",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": "docs/diagrams/architecture.html",
+    "repository": {
+      "url": "https://github.com/AshrafRah96/llm-gateway.git",
+      "revision": "49c1c6aab75c68f67281941060cd909501db9fd5",
+      "provider": "github",
+      "link_mode": "local-only"
+    }
+  },
+  "components": [
+    {
+      "id": "caller",
+      "type": "external",
+      "label": "Client application",
+      "sublabel": "JSON or server-sent events",
+      "pos": [
+        30,
+        60
+      ],
+      "size": [
+        180,
+        80
+      ],
+      "sources": [
+        {
+          "path": "internal/handler/chat.go",
+          "line": 32,
+          "end_line": 43,
+          "label": "HTTP endpoint registration"
+        },
+        {
+          "path": "internal/handler/stream.go",
+          "line": 23,
+          "end_line": 90,
+          "label": "SSE response delivery"
+        }
+      ]
+    },
+    {
+      "id": "ingress",
+      "type": "security",
+      "label": "HTTP admission",
+      "sublabel": "handler / middleware / auth",
+      "pos": [
+        350,
+        60
+      ],
+      "size": [
+        220,
+        80
+      ],
+      "sources": [
+        {
+          "path": "internal/application/application.go",
+          "line": 149,
+          "end_line": 168,
+          "label": "Middleware composition"
+        },
+        {
+          "path": "internal/middleware/auth.go",
+          "line": 26,
+          "end_line": 46,
+          "label": "Project authentication gate"
+        },
+        {
+          "path": "internal/middleware/limits.go",
+          "line": 10,
+          "end_line": 48,
+          "label": "Body, deadline and concurrency"
+        }
+      ],
+      "tag": "Auth \u2192 quota \u2192 resource limits"
+    },
+    {
+      "id": "policy",
+      "type": "backend",
+      "label": "Completion lifecycle",
+      "sublabel": "completion + router",
+      "pos": [
+        750,
+        60
+      ],
+      "size": [
+        235,
+        95
+      ],
+      "sources": [
+        {
+          "path": "internal/completion/completion.go",
+          "line": 129,
+          "end_line": 245,
+          "label": "Shared lifecycle and policy scope"
+        },
+        {
+          "path": "internal/completion/stream.go",
+          "line": 68,
+          "end_line": 218,
+          "label": "Streaming and settlement"
+        },
+        {
+          "path": "internal/router/router.go",
+          "line": 23,
+          "end_line": 61,
+          "label": "Primary and fallback selection"
+        }
+      ],
+      "tag": "Shared by /chat and /chat/stream"
+    },
+    {
+      "id": "access-state",
+      "type": "database",
+      "label": "Redis \u00b7 access state",
+      "sublabel": "Key records + sliding windows",
+      "pos": [
+        350,
+        240
+      ],
+      "size": [
+        220,
+        80
+      ],
+      "sources": [
+        {
+          "path": "internal/auth/keystore.go",
+          "line": 45,
+          "end_line": 76,
+          "label": "HMAC lookup and provisioning"
+        },
+        {
+          "path": "internal/ratelimit/redis.go",
+          "line": 26,
+          "end_line": 81,
+          "label": "Atomic quota and count"
+        },
+        {
+          "path": "internal/middleware/ratelimit.go",
+          "line": 12,
+          "end_line": 32,
+          "label": "Fail-closed quota gate"
+        }
+      ],
+      "tag": "Invalid key: 401 \u00b7 quota: 429"
+    },
+    {
+      "id": "context",
+      "type": "backend",
+      "label": "Retrieval & semantic reuse",
+      "sublabel": "rag + cache",
+      "pos": [
+        350,
+        430
+      ],
+      "size": [
+        220,
+        95
+      ],
+      "sources": [
+        {
+          "path": "internal/rag/rag.go",
+          "line": 116,
+          "end_line": 158,
+          "label": "Project-filtered retrieval"
+        },
+        {
+          "path": "internal/cache/semantic.go",
+          "line": 112,
+          "end_line": 188,
+          "label": "Embed, lookup and write"
+        },
+        {
+          "path": "internal/cache/namespace.go",
+          "line": 22,
+          "end_line": 35,
+          "label": "Project + model + corpus scope"
+        }
+      ],
+      "tag": "Project-scoped; errors fail open"
+    },
+    {
+      "id": "embedding-api",
+      "type": "external",
+      "label": "OpenAI embeddings",
+      "sublabel": "text-embedding-3-small",
+      "pos": [
+        30,
+        430
+      ],
+      "size": [
+        195,
+        95
+      ],
+      "sources": [
+        {
+          "path": "internal/cache/embeddings.go",
+          "line": 12,
+          "end_line": 77,
+          "label": "Embedding API endpoint and call"
+        }
+      ],
+      "tag": "RAG and cache embed separately"
+    },
+    {
+      "id": "vectors",
+      "type": "database",
+      "label": "Redis \u00b7 vector state",
+      "sublabel": "RAG chunks + response cache",
+      "pos": [
+        350,
+        665
+      ],
+      "size": [
+        220,
+        80
+      ],
+      "sources": [
+        {
+          "path": "internal/rag/rag.go",
+          "line": 55,
+          "end_line": 113,
+          "label": "Upload and corpus revision write"
+        },
+        {
+          "path": "internal/rag/rag.go",
+          "line": 116,
+          "end_line": 146,
+          "label": "Project-scoped vector query"
+        },
+        {
+          "path": "internal/cache/semantic.go",
+          "line": 129,
+          "end_line": 222,
+          "label": "Cache lookup, TTL and threshold"
+        }
+      ],
+      "tag": "Project / model / corpus / policy"
+    },
+    {
+      "id": "provider",
+      "type": "backend",
+      "label": "Provider adapter",
+      "sublabel": "provider/openai.go",
+      "pos": [
+        750,
+        430
+      ],
+      "size": [
+        235,
+        95
+      ],
+      "sources": [
+        {
+          "path": "internal/provider/openai.go",
+          "line": 64,
+          "end_line": 140,
+          "label": "Structured requests and neutral SSE"
+        },
+        {
+          "path": "internal/provider/openai.go",
+          "line": 150,
+          "end_line": 171,
+          "label": "Context-bound HTTP call"
+        }
+      ],
+      "tag": "One configured pre-output fallback"
+    },
+    {
+      "id": "chat-api",
+      "type": "external",
+      "label": "OpenAI chat API",
+      "sublabel": "/v1/chat/completions",
+      "pos": [
+        750,
+        665
+      ],
+      "size": [
+        235,
+        80
+      ],
+      "sources": [
+        {
+          "path": "internal/provider/openai.go",
+          "line": 56,
+          "end_line": 99,
+          "label": "Chat endpoint and output caps"
+        },
+        {
+          "path": "internal/completion/completion.go",
+          "line": 213,
+          "end_line": 255,
+          "label": "Distinct conditional fallback"
+        }
+      ],
+      "tag": "JSON or upstream SSE"
+    },
+    {
+      "id": "accounting",
+      "type": "backend",
+      "label": "Usage & request logs",
+      "sublabel": "usage + observability",
+      "pos": [
+        1140,
+        60
+      ],
+      "size": [
+        230,
+        95
+      ],
+      "sources": [
+        {
+          "path": "internal/completion/completion.go",
+          "line": 189,
+          "end_line": 243,
+          "label": "Meter and log completed requests"
+        },
+        {
+          "path": "internal/completion/stream.go",
+          "line": 164,
+          "end_line": 218,
+          "label": "Idempotent bounded settlement"
+        },
+        {
+          "path": "internal/observability/logger.go",
+          "line": 9,
+          "end_line": 32,
+          "label": "Structured log output"
+        }
+      ],
+      "tag": "Partial streams: labelled estimates"
+    },
+    {
+      "id": "usage-state",
+      "type": "database",
+      "label": "Redis \u00b7 usage totals",
+      "sublabel": "Requests, tokens, cost by project",
+      "pos": [
+        1140,
+        430
+      ],
+      "size": [
+        230,
+        95
+      ],
+      "sources": [
+        {
+          "path": "internal/usage/tracker.go",
+          "line": 44,
+          "end_line": 79,
+          "label": "Hash increments and reads"
+        },
+        {
+          "path": "internal/handler/usage.go",
+          "line": 17,
+          "end_line": 35,
+          "label": "Project usage endpoint"
+        },
+        {
+          "path": "internal/completion/completion.go",
+          "line": 258,
+          "end_line": 263,
+          "label": "Production metering identity"
+        }
+      ],
+      "tag": "GET /usage reads project totals"
+    },
+    {
+      "id": "prompt-boundary",
+      "type": "security",
+      "label": "Prompt trust boundary",
+      "sublabel": "completion/input.go",
+      "tag": "System policy; references + question",
+      "pos": [
+        750,
+        255
+      ],
+      "size": [
+        235,
+        95
+      ],
+      "sources": [
+        {
+          "path": "internal/completion/input.go",
+          "line": 5,
+          "end_line": 43,
+          "label": "Fixed policy and encoded data"
+        },
+        {
+          "path": "internal/completion/completion.go",
+          "line": 154,
+          "end_line": 159,
+          "label": "Policy-versioned cache scope"
+        },
+        {
+          "path": "internal/provider/openai.go",
+          "line": 64,
+          "end_line": 92,
+          "label": "Builder used by JSON and SSE"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "request",
+      "from": "caller",
+      "to": "ingress",
+      "label": "HTTP + X-API-Key",
+      "variant": "emphasis"
+    },
+    {
+      "id": "admitted",
+      "from": "ingress",
+      "to": "policy",
+      "label": "Valid chat request",
+      "variant": "emphasis"
+    },
+    {
+      "id": "auth-quota",
+      "from": "ingress",
+      "to": "access-state",
+      "label": "Lookup + Lua",
+      "variant": "security"
+    },
+    {
+      "id": "retrieve-cache",
+      "from": "policy",
+      "to": "context",
+      "label": "Retrieve / cache",
+      "variant": "default"
+    },
+    {
+      "id": "embed",
+      "from": "context",
+      "to": "embedding-api",
+      "label": "HTTPS embed",
+      "variant": "default"
+    },
+    {
+      "id": "vector-io",
+      "from": "context",
+      "to": "vectors",
+      "label": "Search / store",
+      "variant": "default"
+    },
+    {
+      "id": "cache-miss",
+      "from": "policy",
+      "to": "prompt-boundary",
+      "label": "Cache miss",
+      "variant": "emphasis"
+    },
+    {
+      "id": "upstream",
+      "from": "provider",
+      "to": "chat-api",
+      "label": "HTTPS POST",
+      "variant": "emphasis"
+    },
+    {
+      "id": "settle",
+      "from": "policy",
+      "to": "accounting",
+      "label": "Meter + log",
+      "variant": "default"
+    },
+    {
+      "id": "usage-io",
+      "from": "accounting",
+      "to": "usage-state",
+      "label": "Increment totals",
+      "variant": "default"
+    },
+    {
+      "id": "build-messages",
+      "from": "prompt-boundary",
+      "to": "provider",
+      "label": "System + data",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Entry and ownership",
+      "items": [
+        "main starts application.New. Application validates configuration, owns Redis and composes :8080 HTTP. Startup: 10s. Shutdown: 30s. Sources: main.go:15\u201359; internal/application/application.go:117\u2013174.",
+        "/chat and /chat/stream share completion policy. /usage and /limits use the same admission gates; /health and /models are public. Sources: internal/handler/chat.go:32\u201343; internal/handler/limits.go:17\u201343."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Routing, retrieval and cache",
+      "items": [
+        "Route the original question before retrieval. Over 500 bytes or a complexity keyword selects the powerful tier. RAG filters project and active state before ranking; up to four chunks at similarity \u22650.80. Sources: internal/router/router.go:41\u201360; internal/rag/rag.go:22\u201331,116\u2013158.",
+        "RAG misses/errors continue ungrounded. Cache errors become misses. Cache similarity \u22650.95; default TTL 24h. A hit skips chat generation and usage increments but still requires embedding calls. Sources: internal/completion/completion.go:129\u2013210; internal/cache/semantic.go:18\u201324,112\u2013222.",
+        "Cache scope: project hash, primary routed model, schema, corpus revision and prompt-policy-v1. Fallback answers retain the original routed namespace. Sources: internal/cache/namespace.go:22\u201335; internal/completion/completion.go:157\u2013159,213\u2013242."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Prompt boundaries",
+      "items": [
+        "One fixed system policy. Optional JSON-encoded untrusted references in a user message. Original question in a separate user message. Input cannot create API roles or enter trusted policy. Source: internal/completion/input.go:5\u201343.",
+        "Same builder for JSON, SSE and fallback. No tools, classifier, phrase blocklist or output screening. Tests prove serialization and wiring; model-level resistance is unmeasured. Sources: internal/provider/openai.go:64\u201392; internal/completion/completion.go:213\u2013216; internal/completion/stream.go:80\u201389."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Fallback and settlement",
+      "items": [
+        "Try one distinct configured fallback on transport error or HTTP 408/429/5xx before output. Cancellation/deadline errors do not retry. Defaults equal primary, so default routes do not retry. Sources: internal/application/application.go:94\u2013108; internal/completion/completion.go:213\u2013255; internal/completion/stream.go:80\u2013100.",
+        "Settle once at exhaustion or Close. Without provider usage, estimate policy, references, question and received output. Mark estimates; settlement outlives cancellation with a 5s budget. Cache only complete nonempty streams. Sources: internal/completion/input.go:46\u201351; internal/completion/stream.go:154\u2013240."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "State and operator paths",
+      "items": [
+        "Redis boxes are logical groups in one configured Redis Stack instance. No persistent volume is declared in Compose. Key quotas use HMAC key ID; concurrency/RAG/cache/usage use project identity. Sources: internal/application/application.go:124\u2013161; docker-compose.yml:1\u201326; internal/middleware/ratelimit.go:15\u201329.",
+        "project-key provisions fingerprints. rag-import reads reviewed text; rag.Upload embeds and atomically replaces chunks while advancing corpus revision. Sources: cmd/project-key/main.go:18\u201345; cmd/rag-import/main.go:16\u201345; internal/rag/rag.go:55\u2013113.",
+        "cache-eval measures classification with real embeddings; provider-smoke checks a running gateway. Reports are opt-in, outside serving/normal CI. CI builds, vets, checks format/race tests, and rejects skipped Redis-backed tests. Sources: cmd/cache-eval/main.go:36\u201395; cmd/provider-smoke/main.go:56\u2013131; .github/workflows/ci.yml:8\u201372."
+      ]
+    }
+  ]
+}
