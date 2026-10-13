@@ -39,7 +39,7 @@ dbfilename dump.rdb
 save ""
 appendonly no
 appendfsync always
-aclfile /run/restore/users.acl
+aclfile /data/restore/users.acl
 maxmemory 256mb
 maxmemory-policy noeviction
 CONFIG
@@ -51,23 +51,32 @@ llmgw_volume_created=true
 docker create --name "$llmgw_container" --label "llm-gateway.restore-check=$llmgw_id" \
   --network none --read-only --tmpfs /tmp --memory 512m --cpus 1 --pids-limit 128 \
   --security-opt no-new-privileges --cap-drop ALL \
-  -v "$llmgw_volume:/data" -v "$llmgw_scratch:/run/restore:ro" \
-  "$llmgw_image" /opt/redis-stack/bin/redis-server /run/restore/redis.conf >/dev/null
+  -v "$llmgw_volume:/data" \
+  "$llmgw_image" /opt/redis-stack/bin/redis-server /data/restore/redis.conf >/dev/null
 llmgw_created=true
-# Normalize ownership without weakening the copied RDB's private file mode.
-python3 - "$llmgw_scratch/dump.rdb" <<'PY' | docker cp - "$llmgw_container:/data"
-import sys, tarfile
+# Container-owned copies keep host files private without relying on DAC override.
+python3 - "$llmgw_scratch" <<'PY_ARCHIVE' | docker cp - "$llmgw_container:/data"
+import pathlib, sys, tarfile
+root = pathlib.Path(sys.argv[1])
 with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as archive:
-    info = archive.gettarinfo(sys.argv[1], arcname='dump.rdb')
-    info.uid = info.gid = 0
-    info.uname = info.gname = ''
-    info.mode = 0o600
-    with open(sys.argv[1], 'rb') as snapshot:
-        archive.addfile(info, snapshot)
-PY
+    directory = tarfile.TarInfo('restore')
+    directory.type = tarfile.DIRTYPE
+    directory.mode = 0o700
+    archive.addfile(directory)
+    for name in ('dump.rdb', 'redis.conf', 'users.acl', 'password'):
+        path = root / name
+        target = name if name == 'dump.rdb' else 'restore/' + name
+        info = archive.gettarinfo(str(path), arcname=target)
+        info.uid = info.gid = 0
+        info.uname = info.gname = ''
+        info.mode = 0o600
+        with path.open('rb') as source:
+            archive.addfile(info, source)
+PY_ARCHIVE
+
 redis() {
   docker exec "$llmgw_container" sh -ec '
-    REDISCLI_AUTH=$(cat /run/restore/password)
+    REDISCLI_AUTH=$(cat /data/restore/password)
     export REDISCLI_AUTH
     exec redis-cli --user restore --raw -e "$@"
   ' sh "$@"
@@ -79,6 +88,7 @@ ready() {
     llmgw_attempt=$((llmgw_attempt + 1))
     sleep 1
   done
+  docker logs --tail 20 "$llmgw_container" >&2
   echo 'Isolated Redis did not become ready.' >&2; exit 1
 }
 # Stable hashes verify every auth/ledger field without printing records or credentials.
@@ -114,8 +124,8 @@ while :; do
   sleep 1
 done
 redis SET restore-check:canary "$llmgw_id" >/dev/null
-# The container cannot write its config; the host changes only its private drill copy.
-printf '\nappendonly yes\n' >> "$llmgw_scratch/redis.conf"
+# Persist only the drill configuration in its isolated writable volume.
+redis CONFIG REWRITE >/dev/null
 docker restart -t 30 "$llmgw_container" >/dev/null
 ready
 [ "$(redis GET restore-check:canary)" = "$llmgw_id" ] || { echo 'AOF canary did not survive restart.' >&2; exit 1; }

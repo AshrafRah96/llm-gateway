@@ -5,15 +5,15 @@
   "status": "pass",
   "type": "architecture",
   "quality": "showcase",
-  "startedAt": "2026-10-13T21:39:00.592Z",
+  "startedAt": "2026-10-13T21:59:02.897Z",
   "specification": {
     "path": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.json",
-    "sha256": "5d958c455d8df47639791ddd716188fc980b44304db78908f9b7d1d1c01cc8e9",
+    "sha256": "6ae6ac789d714880c13c4ddd0e1fbe9129f6391e5919064727a15eb9118ec0d8",
     "bytes": 14684
   },
   "artifact": {
     "path": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.html",
-    "sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+    "sha256": "fcfbd4d9b1b2d4902edca46436541f2c47b11496163972146d3524203c616bd5",
     "bytes": 778706
   },
   "stages": {
@@ -32,7 +32,7 @@
         "--quality",
         "showcase",
         "--repo-root",
-        "/private/tmp/llmgw-source-publication-yitxr8ql",
+        "/private/tmp/llmgw-source-restore-fix-p31vpv31",
         "--json"
       ],
       "receipt": {
@@ -40,7 +40,7 @@
         "ok": true,
         "command": "validate",
         "specification": {
-          "sha256": "5d958c455d8df47639791ddd716188fc980b44304db78908f9b7d1d1c01cc8e9",
+          "sha256": "6ae6ac789d714880c13c4ddd0e1fbe9129f6391e5919064727a15eb9118ec0d8",
           "bytes": 14684
         },
         "validation": {
@@ -56,7 +56,7 @@
     "deliver": {
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 465,
+      "durationMs": 511,
       "command": [
         "/opt/homebrew/Cellar/node/26.11.0/bin/node",
         "/Users/ashrxh/.agents/skills/archify/bin/archify.mjs",
@@ -67,23 +67,23 @@
         "--quality",
         "showcase",
         "--repo-root",
-        "/private/tmp/llmgw-source-publication-yitxr8ql",
+        "/private/tmp/llmgw-source-restore-fix-p31vpv31",
         "--json"
       ],
       "receipt": {
         "schemaVersion": 1,
-        "receiptId": "bb01a32b-4540-4ecc-b110-275757969f74",
+        "receiptId": "1a3334aa-cc04-4bfe-8342-820b18aa74bf",
         "ok": true,
         "command": "deliver",
         "type": "architecture",
         "input": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.json",
         "output": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.html",
         "specification": {
-          "sha256": "5d958c455d8df47639791ddd716188fc980b44304db78908f9b7d1d1c01cc8e9",
+          "sha256": "6ae6ac789d714880c13c4ddd0e1fbe9129f6391e5919064727a15eb9118ec0d8",
           "bytes": 14684
         },
         "artifact": {
-          "sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+          "sha256": "fcfbd4d9b1b2d4902edca46436541f2c47b11496163972146d3524203c616bd5",
           "bytes": 778706
         },
         "validation": {
@@ -97,7 +97,7 @@
         "evidence": {
           "verified": true,
           "repository": "https://github.com/AshrafRah96/llm-gateway",
-          "revision": "8154d082600eeaea0ba8a9db1feab28544bfe8f2",
+          "revision": "81dee93333f19816048de9b5419537b5fa3569aa",
           "references": 29,
           "linkMode": "local-only"
         },
@@ -129,7 +129,7 @@
         "ok": true,
         "file": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.html",
         "artifact": {
-          "sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+          "sha256": "fcfbd4d9b1b2d4902edca46436541f2c47b11496163972146d3524203c616bd5",
           "bytes": 778706
         },
         "checks": [
@@ -258,13 +258,13 @@
           "issues": []
         },
         "provenance": "current",
-        "deliveryReceiptId": "bb01a32b-4540-4ecc-b110-275757969f74"
+        "deliveryReceiptId": "1a3334aa-cc04-4bfe-8342-820b18aa74bf"
       }
     },
     "browser-check": {
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 760,
+      "durationMs": 783,
       "command": [
         "/opt/homebrew/Cellar/node/26.11.0/bin/node",
         "/Users/ashrxh/.agents/skills/archify/bin/archify.mjs",
@@ -273,7 +273,7 @@
         "--json",
         "--require-provenance",
         "--out-dir",
-        "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-publication-cleanup-20261013/final"
+        "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-restore-ci-fix-20261013/final"
       ],
       "execution": "in-process",
       "receipt": {
@@ -284,10 +284,10 @@
         "status": "pass",
         "visualReview": "not-requested",
         "provenance": "current",
-        "deliveryReceiptId": "bb01a32b-4540-4ecc-b110-275757969f74",
+        "deliveryReceiptId": "1a3334aa-cc04-4bfe-8342-820b18aa74bf",
         "artifact": {
           "path": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.html",
-          "sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+          "sha256": "fcfbd4d9b1b2d4902edca46436541f2c47b11496163972146d3524203c616bd5",
           "bytes": 778706
         },
         "state": {
@@ -993,7 +993,7 @@
           "contactSheet": null
         },
         "sidecars": {
-          "directory": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-publication-cleanup-20261013/final",
+          "directory": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-restore-ci-fix-20261013/final",
           "receipt": "architecture.browser-check.json",
           "files": []
         }
@@ -1002,13 +1002,13 @@
   },
   "diagnostics": [],
   "evidence": {
-    "receipt": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-publication-cleanup-20261013/final/architecture.finalize.json",
-    "summaryReceipt": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-publication-cleanup-20261013/final/architecture.finalize-summary.json",
-    "browserCheckReceipt": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-publication-cleanup-20261013/final/architecture.browser-check.json"
+    "receipt": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-restore-ci-fix-20261013/final/architecture.finalize.json",
+    "summaryReceipt": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-restore-ci-fix-20261013/final/architecture.finalize-summary.json",
+    "browserCheckReceipt": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-restore-ci-fix-20261013/final/architecture.browser-check.json"
   },
   "visualReview": "not-requested",
-  "finishedAt": "2026-10-13T21:39:02.092Z",
-  "durationMs": 1500,
+  "finishedAt": "2026-10-13T21:59:04.463Z",
+  "durationMs": 1565,
   "update": {
     "status": "current",
     "installedVersion": "3.0.1",

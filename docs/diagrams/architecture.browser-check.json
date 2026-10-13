@@ -6,10 +6,10 @@
   "status": "pass",
   "visualReview": "not-requested",
   "provenance": "current",
-  "deliveryReceiptId": "bb01a32b-4540-4ecc-b110-275757969f74",
+  "deliveryReceiptId": "1a3334aa-cc04-4bfe-8342-820b18aa74bf",
   "artifact": {
     "path": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.html",
-    "sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+    "sha256": "fcfbd4d9b1b2d4902edca46436541f2c47b11496163972146d3524203c616bd5",
     "bytes": 778706
   },
   "state": {
@@ -715,7 +715,7 @@
     "contactSheet": null
   },
   "sidecars": {
-    "directory": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-publication-cleanup-20261013/final",
+    "directory": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-restore-ci-fix-20261013/final",
     "receipt": "architecture.browser-check.json",
     "files": []
   }

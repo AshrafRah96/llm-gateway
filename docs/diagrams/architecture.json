@@ -8,7 +8,7 @@
     "output": "docs/diagrams/architecture.html",
     "repository": {
       "url": "https://github.com/AshrafRah96/llm-gateway.git",
-      "revision": "8154d082600eeaea0ba8a9db1feab28544bfe8f2",
+      "revision": "81dee93333f19816048de9b5419537b5fa3569aa",
       "provider": "github",
       "link_mode": "local-only"
     }
@@ -522,7 +522,7 @@
       "dot": "violet",
       "title": "Operators and honest evidence",
       "items": [
-        "project-key preserves binding, adds 90-day new expiry and 24h default overlap. Explicit key/usage migration preserves old records and totals. Backup/isolated restore scripts verify synthetic RDB/AOF recovery. Sources: cmd/project-key/main.go:24\u201391; internal/auth/migration.go:94\u2013146; internal/usage/reconcile.go:165\u2013235; scripts/ledger-restore-check.sh:1\u2013128.",
+        "project-key preserves binding, adds 90-day new expiry and 24h default overlap. Explicit key/usage migration preserves old records and totals. Backup/isolated restore scripts verify synthetic RDB/AOF recovery. Sources: cmd/project-key/main.go:24\u201391; internal/auth/migration.go:94\u2013146; internal/usage/reconcile.go:165\u2013235; scripts/ledger-restore-check.sh:1\u2013138.",
         "Smoke/cache/adversarial tools are opt-in. Adversarial default prepares an unpaid report: fixed controls, three trials per JSON/SSE case. No paid/live resistance or invoice evidence measured. Sources: cmd/adversarial-eval/main.go:49\u2013161; docs/evaluation/adversarial-prepared-v1.md:1\u201313."
       ]
     }

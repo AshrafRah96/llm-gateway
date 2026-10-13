@@ -1,6 +1,6 @@
 {
   "diagram_type": "architecture",
-  "artifact_sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+  "artifact_sha256": "fcfbd4d9b1b2d4902edca46436541f2c47b11496163972146d3524203c616bd5",
   "export_sha256": "a901de1929e2d92e5875c34e02d294c0a5636bdfd3c3d3f7367fbb146ad9d05c",
   "visual_review": "not_requested",
   "correction_rounds": 1,
@@ -28,6 +28,6 @@
     "Browser connector local-file restriction was not bypassed."
   ],
   "captures_artifact_sha256": "d374e5c400c13cfd4eaabc8c637b4e2777a47ce3a6f2a618cc9dccca90722e51",
-  "review_basis": "Previous captures inspected unchanged geometry. Current source metadata/citation passed automated browser checks; changed card text was not recaptured.",
+  "review_basis": "Prior captures inspected unchanged geometry. Updated source identity and citation passed automated browser checks.",
   "previous_geometry_review": "passed"
 }

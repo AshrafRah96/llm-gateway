@@ -36,6 +36,7 @@ sh scripts/ledger-restore-check.sh .cache/ledger-backups/YOUR_SNAPSHOT.rdb
 Compare the first hash with your recorded backup hash. The drill copies the RDB
 into a new uniquely named volume and container. It publishes no ports, has no
 network, and uses a private temporary credential directory beneath ignored `.cache/`.
+Container-owned copies of configuration and credentials keep host files private on Linux.
 It loads the RDB, fingerprints all auth/ledger hash fields, reports record counts,
 enables AOF, writes a drill-only canary and verifies both records and canary after
 restarting the container. It checks the input checksum remains unchanged, then

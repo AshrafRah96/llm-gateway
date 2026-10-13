@@ -1,7 +1,7 @@
 {
   "diagram_type": "architecture",
-  "source_artifact_sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
-  "specification_sha256": "5d958c455d8df47639791ddd716188fc980b44304db78908f9b7d1d1c01cc8e9",
+  "source_artifact_sha256": "fcfbd4d9b1b2d4902edca46436541f2c47b11496163972146d3524203c616bd5",
+  "specification_sha256": "6ae6ac789d714880c13c4ddd0e1fbe9129f6391e5919064727a15eb9118ec0d8",
   "export": "docs/diagrams/architecture.svg",
   "export_sha256": "a901de1929e2d92e5875c34e02d294c0a5636bdfd3c3d3f7367fbb146ad9d05c",
   "export_bytes": 168282,
@@ -12,5 +12,5 @@
   ],
   "nodes": 12,
   "connections": 13,
-  "derivation": "Source metadata and one evidence citation changed; static SVG topology, labels and geometry are unchanged."
+  "derivation": "Source identity and restore-helper citation updated; static SVG topology, labels and geometry unchanged."
 }

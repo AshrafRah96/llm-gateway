@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "receiptId": "bb01a32b-4540-4ecc-b110-275757969f74",
+  "receiptId": "1a3334aa-cc04-4bfe-8342-820b18aa74bf",
   "status": "current",
   "command": "deliver",
   "type": "architecture",
   "input": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.json",
   "output": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.html",
   "specification": {
-    "sha256": "5d958c455d8df47639791ddd716188fc980b44304db78908f9b7d1d1c01cc8e9",
+    "sha256": "6ae6ac789d714880c13c4ddd0e1fbe9129f6391e5919064727a15eb9118ec0d8",
     "bytes": 14684
   },
   "artifact": {
-    "sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+    "sha256": "fcfbd4d9b1b2d4902edca46436541f2c47b11496163972146d3524203c616bd5",
     "bytes": 778706
   }
 }
