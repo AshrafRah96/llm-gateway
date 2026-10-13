@@ -238,6 +238,76 @@ func TestStream_CacheHitReplays(t *testing.T) {
 	}
 }
 
+func TestStream_NonOKCacheEntryIsMiss(t *testing.T) {
+	for _, status := range []int{0, http.StatusTooManyRequests, http.StatusBadGateway} {
+		p := &fakeProvider{events: completeEvents, status: http.StatusOK}
+		c, fc, _ := newFixture(p)
+		fc.entry = &cache.CacheEntry{Response: []byte(okBody), Status: status}
+		s, err := c.Stream(context.Background(), Request{Prompt: "hi"})
+		if err != nil {
+			t.Fatalf("cached status %d: Stream: %v", status, err)
+		}
+		if s.CacheHit() || p.streamCalls != 1 {
+			t.Fatalf("cached status %d: cache hit=%v, provider calls=%d", status, s.CacheHit(), p.streamCalls)
+		}
+		chunks := drain(t, s)
+		if len(chunks) != 3 || !chunks[2].Done || fc.sets != 1 {
+			t.Fatalf("cached status %d: chunks=%+v, cache writes=%d", status, chunks, fc.sets)
+		}
+	}
+}
+
+type closeErrorStream struct {
+	ProviderStream
+	err   error
+	calls int
+}
+
+func (s *closeErrorStream) Close() error {
+	s.calls++
+	return errors.Join(s.ProviderStream.Close(), s.err)
+}
+
+func TestStream_CloseFailureIsReportedAndNotCached(t *testing.T) {
+	closeErr := errors.New("ledger settlement failed")
+	readErr := errors.New("upstream read failed")
+	for _, mode := range []string{"abandoned", "completed", "read failure"} {
+		t.Run(mode, func(t *testing.T) {
+			p := &fakeProvider{events: completeEvents, status: http.StatusOK}
+			if mode == "read failure" {
+				p.events, p.readErr = []ProviderEvent{{Content: "partial"}}, readErr
+			}
+			c, fc, fr := newFixture(p)
+			s, err := c.Stream(context.Background(), Request{Prompt: "hi"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := &closeErrorStream{ProviderStream: s.body, err: closeErr}
+			s.body = body
+			if mode == "abandoned" {
+				if chunk, ok := s.Next(); !ok || chunk.Content == "" {
+					t.Fatal("no content before abandonment")
+				}
+			} else {
+				for _, chunk := range drain(t, s) {
+					if chunk.Done {
+						t.Error("settlement failure emitted successful terminal chunk")
+					}
+				}
+			}
+			for i := 0; i < 2; i++ {
+				err := s.Close()
+				if !errors.Is(err, closeErr) || (mode == "read failure" && !errors.Is(err, readErr)) {
+					t.Errorf("Close = %v, want preserved errors", err)
+				}
+			}
+			if fc.sets != 0 || fr.calls != 1 || body.calls != 1 {
+				t.Errorf("cache writes=%d, usage writes=%d, provider closes=%d; want 0/1/1", fc.sets, fr.calls, body.calls)
+			}
+		})
+	}
+}
+
 // A stream cut short never sends [DONE]. Caching what arrived would serve a truncated
 // answer to every semantically similar prompt from then on.
 func TestStream_TruncatedStreamIsNotCached(t *testing.T) {

@@ -4,9 +4,12 @@ package main
 import (
 	"context"
 	"flag"
+	"github.com/ashrafrah96/llm-gateway/internal/redisconfig"
+	"github.com/ashrafrah96/llm-gateway/internal/usage"
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
 	"github.com/ashrafrah96/llm-gateway/internal/rag"
@@ -20,7 +23,10 @@ func main() {
 	if *project == "" || *file == "" {
 		log.Fatal("-project and -file are required")
 	}
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey, err := redisconfig.Secret(os.Getenv, "OPENAI_API_KEY")
+	if err != nil {
+		log.Fatal(err)
+	}
 	if apiKey == "" {
 		log.Fatal("OPENAI_API_KEY not set")
 	}
@@ -28,17 +34,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("read document: %v", err)
 	}
-	addr := os.Getenv("REDIS_ADDR")
-	if addr == "" {
-		addr = "localhost:6379"
+	options, err := redisconfig.Options(os.Getenv, "REDIS_", "localhost:6379")
+	if err != nil {
+		log.Fatal(err)
 	}
-	client := redis.NewClient(&redis.Options{Addr: addr, Protocol: 2})
+	ledgerOptions, err := redisconfig.Options(os.Getenv, "LEDGER_REDIS_", "localhost:6380")
+	if err != nil {
+		log.Fatal(err)
+	}
+	client := redis.NewClient(options)
 	defer client.Close()
-	store, err := rag.New(context.Background(), client, cache.NewEmbeddingClient(apiKey))
+	ledger := redis.NewClient(ledgerOptions)
+	defer ledger.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	ctx = usage.WithProject(ctx, *project)
+	store, err := rag.New(ctx, client, cache.NewMeteredEmbeddingClient(apiKey, usage.NewTracker(ledger), "rag_import"))
 	if err != nil {
 		log.Fatalf("create RAG store: %v", err)
 	}
-	id, err := store.Upload(context.Background(), *project, filepath.Base(*file), string(content))
+	id, err := store.Upload(ctx, *project, filepath.Base(*file), string(content))
 	if err != nil {
 		log.Fatalf("upload document: %v", err)
 	}

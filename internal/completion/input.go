@@ -50,3 +50,6 @@ func (in ProviderInput) estimateTokens() int {
 	}
 	return total
 }
+
+// PolicyVersion identifies message framing and cache-policy compatibility.
+func PolicyVersion() string { return promptPolicyVersion }

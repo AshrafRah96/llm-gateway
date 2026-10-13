@@ -12,9 +12,14 @@ import (
 
 	"github.com/ashrafrah96/llm-gateway/internal/completion"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
+	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
 
-const maxSSELine = 1 << 20
+const (
+	maxJSONResponse = 1 << 20
+	maxSSELine      = 1 << 20
+	maxSSEBody      = 4 << 20
+)
 
 type streamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
@@ -34,8 +39,8 @@ type OpenAIClient struct {
 }
 
 type streamUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
+	PromptTokens     *int `json:"prompt_tokens"`
+	CompletionTokens *int `json:"completion_tokens"`
 }
 
 type streamChunk struct {
@@ -104,7 +109,8 @@ func (s *openAIStream) Next() (completion.ProviderEvent, bool) {
 		return completion.ProviderEvent{}, false
 	}
 
-	for s.scanner.Scan() {
+	// A buffered Done must not hide a body-limit error from the same read.
+	for s.scanner.Scan() && s.scanner.Err() == nil {
 		line := s.scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
 			continue
@@ -127,15 +133,23 @@ func (s *openAIStream) Next() (completion.ProviderEvent, bool) {
 		}
 		event := completion.ProviderEvent{Content: content.String()}
 		if chunk.Usage != nil {
+			if chunk.Usage.PromptTokens == nil || chunk.Usage.CompletionTokens == nil || *chunk.Usage.PromptTokens < 0 || *chunk.Usage.CompletionTokens < 0 {
+				s.err = fmt.Errorf("invalid stream usage")
+				s.body.Close()
+				return completion.ProviderEvent{}, false
+			}
 			event.Usage = &completion.ProviderUsage{
-				PromptTokens:     chunk.Usage.PromptTokens,
-				CompletionTokens: chunk.Usage.CompletionTokens,
+				PromptTokens:     *chunk.Usage.PromptTokens,
+				CompletionTokens: *chunk.Usage.CompletionTokens,
 			}
 		}
 		return event, true
 	}
 
 	s.err = s.scanner.Err()
+	if s.err != nil {
+		s.body.Close()
+	}
 	return completion.ProviderEvent{}, false
 }
 
@@ -159,6 +173,9 @@ func (c *OpenAIClient) do(ctx context.Context, payload openAIRequest) (io.ReadCl
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	if id := usage.ClientRequestID(ctx); id != "" {
+		req.Header.Set("X-Client-Request-Id", id)
+	}
 
 	// http.DefaultClient has no total timeout; cancellation is via ctx only.
 	// A per-request deadline belongs on the caller's context, not here — a long stream
@@ -168,5 +185,11 @@ func (c *OpenAIClient) do(ctx context.Context, payload openAIRequest) (io.ReadCl
 		return nil, 0, fmt.Errorf("do: %w", err)
 	}
 
-	return resp.Body, resp.StatusCode, nil
+	usage.ProviderRequestID(ctx, resp.Header.Get("x-request-id"))
+
+	limit := int64(maxJSONResponse)
+	if payload.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		limit = maxSSEBody
+	}
+	return http.MaxBytesReader(nil, resp.Body, limit), resp.StatusCode, nil
 }

@@ -3,6 +3,7 @@ package completion
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -66,7 +67,10 @@ type Stream struct {
 }
 
 func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
-	l := c.begin(ctx, req)
+	l, err := c.begin(ctx, req)
+	if err != nil {
+		return nil, err
+	}
 	s := &Stream{lifecycle: l}
 
 	if entry := l.lookup(ctx); entry != nil {
@@ -77,13 +81,13 @@ func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 		// An entry we cannot read is a miss, not a failure.
 	}
 
-	body, status, err := c.provider.Stream(ctx, l.input, l.model)
+	body, status, err := c.provider.Stream(l.ctx, l.input, l.model)
 	if shouldFailover(err, status) && l.fallback.ID != "" && l.fallback.ID != l.model.ID {
 		if body != nil {
 			_ = body.Close()
 		}
 		s.failover = true
-		body, status, err = c.provider.Stream(ctx, l.input, l.fallback)
+		body, status, err = c.provider.Stream(l.ctx, l.input, l.fallback)
 		if err == nil && status == http.StatusOK {
 			l.model = l.fallback
 		}
@@ -92,7 +96,9 @@ func (c *Completion) Stream(ctx context.Context, req Request) (*Stream, error) {
 		return nil, err
 	}
 	if status != http.StatusOK {
-		body.Close()
+		if body != nil {
+			body.Close()
+		}
 		return nil, &UpstreamError{Status: status}
 	}
 
@@ -141,7 +147,9 @@ func (s *Stream) Next() (StreamChunk, bool) {
 		}
 		if event.Done {
 			s.done, s.complete = true, true
-			_ = s.settle()
+			if err := s.settle(); err != nil {
+				return StreamChunk{}, false
+			}
 			return StreamChunk{Done: true}, true
 		}
 		if event.Content != "" {
@@ -155,7 +163,7 @@ func (s *Stream) Next() (StreamChunk, bool) {
 // fallback for abandonment and is safe to call twice.
 func (s *Stream) Close() error {
 	if s.closed {
-		return nil
+		return s.settleErr
 	}
 	s.closed = true
 	return s.settle()
@@ -168,7 +176,7 @@ func (s *Stream) settle() error {
 	s.settled = true
 
 	if s.body != nil {
-		s.body.Close()
+		s.err = errors.Join(s.err, s.body.Close())
 	}
 
 	entry := observability.RequestLog{Status: http.StatusOK}
@@ -205,7 +213,7 @@ func (s *Stream) settle() error {
 	})
 
 	// A provider stream is cacheable only after its explicit terminal event.
-	if !s.complete {
+	if !s.complete || s.err != nil {
 		if s.err != nil {
 			log.Printf("stream read error: %v", s.err)
 		}
@@ -241,6 +249,9 @@ func assemble(content string, tokensIn, tokensOut int) ([]byte, bool) {
 }
 
 func replayChunks(entry *cache.CacheEntry) ([]StreamChunk, bool) {
+	if entry.Status != http.StatusOK {
+		return nil, false
+	}
 	var stored completionBody
 	if err := json.Unmarshal(entry.Response, &stored); err != nil {
 		return nil, false

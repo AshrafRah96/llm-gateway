@@ -1,26 +1,83 @@
 services:
   redis:
-    # redis-stack, not plain redis: the semantic cache needs the vector search
-    # commands, which only the stack image has.
-    image: redis/redis-stack:latest
-    ports:
-      - "6379:6379"
-      - "8001:8001" # RedisInsight, handy for looking at what got cached
+    image: redis/redis-stack-server@sha256:798ab84d9f266936b034ab11c4d04a2b8e4b441884c5aa7d17ac951eefdf742a
+    environment:
+      REDIS_ARGS: --protected-mode yes
+    volumes:
+      - ./deployment/cache.conf:/redis-stack.conf:ro
+      - vector-data:/data
+    secrets: [redis_ca, cache_certificate, cache_private_key, cache_acl, cache_gateway_password]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$(cat /run/secrets/cache_gateway_password) redis-cli --tls --cacert /run/secrets/redis_ca --user gateway ping | grep -q PONG']
       interval: 5s
       timeout: 3s
       retries: 10
+    mem_limit: 768m
+    cpus: 2
+    security_opt: [no-new-privileges:true]
+    networks: [state]
+
+  ledger:
+    image: redis/redis-stack-server@sha256:798ab84d9f266936b034ab11c4d04a2b8e4b441884c5aa7d17ac951eefdf742a
+    command: [/opt/redis-stack/bin/redis-server, /redis-stack.conf]
+    volumes:
+      - ./deployment/ledger.conf:/redis-stack.conf:ro
+      - ledger-data:/data
+    secrets: [redis_ca, ledger_certificate, ledger_private_key, ledger_acl, ledger_gateway_password, ledger_backup_password]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$(cat /run/secrets/ledger_gateway_password) redis-cli --tls --cacert /run/secrets/redis_ca --user gateway ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    cpus: 1
+    security_opt: [no-new-privileges:true]
+    networks: [state]
 
   gateway:
     build: .
-    ports:
-      - "8080:8080"
+    ports: [127.0.0.1:8080:8080]
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY before running compose}
-      API_KEY_PEPPER: ${API_KEY_PEPPER:?set API_KEY_PEPPER before running compose}
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+      API_KEY_PEPPER_FILE: /run/secrets/key_pepper
       REDIS_ADDR: redis:6379
+      REDIS_USERNAME: gateway
+      REDIS_PASSWORD_FILE: /run/secrets/cache_gateway_password
+      REDIS_TLS: 'true'
+      REDIS_TLS_CA: /run/secrets/redis_ca
+      LEDGER_REDIS_ADDR: ledger:6379
+      LEDGER_REDIS_USERNAME: gateway
+      LEDGER_REDIS_PASSWORD_FILE: /run/secrets/ledger_gateway_password
+      LEDGER_REDIS_TLS: 'true'
+      LEDGER_REDIS_TLS_CA: /run/secrets/redis_ca
       CACHE_TTL: ${CACHE_TTL:-24h}
+    secrets: [openai_api_key, key_pepper, redis_ca, cache_gateway_password, ledger_gateway_password]
     depends_on:
-      redis:
-        condition: service_healthy
+      redis: {condition: service_healthy}
+      ledger: {condition: service_healthy}
+    mem_limit: 256m
+    cpus: 1
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    networks: [state, outbound]
+
+networks:
+  state: {internal: true}
+  outbound: {}
+volumes:
+  vector-data: {}
+  ledger-data: {}
+secrets:
+  redis_ca: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/ca.crt'}
+  cache_certificate: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/cache.crt'}
+  cache_private_key: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/cache.key'}
+  cache_acl: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/cache.acl'}
+  cache_gateway_password: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/cache_gateway'}
+  ledger_certificate: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/ledger.crt'}
+  ledger_private_key: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/ledger.key'}
+  ledger_acl: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/ledger.acl'}
+  ledger_gateway_password: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/ledger_gateway'}
+  ledger_backup_password: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/ledger_backup'}
+  key_pepper: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/pepper'}
+  openai_api_key: {file: '${DEPLOYMENT_SECRET_DIR:-.cache/deploy}/openai_api_key'}

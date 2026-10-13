@@ -7,18 +7,18 @@ Operator-reviewed Markdown/text. Authenticated project filter. No automatic exte
 Use a stable deployment pepper. The command prints the raw key once; Redis stores only its HMAC fingerprint and project binding.
 
 ```bash
-export API_KEY_PEPPER='a-long-random-secret'
+source .cache/deploy/operator.env
 go run ./cmd/project-key -project support-app
 ```
 
 Import reviewed UTF-8 content. This example imports the repository's architecture notes:
 
 ```bash
-export OPENAI_API_KEY=sk-your-key
 go run ./cmd/rag-import -project support-app -file docs/ARCHITECTURE.md
 ```
 
-Set `REDIS_ADDR` when Redis Stack is not at `localhost:6379`.
+Initialize the two-store deployment first. [Operations](OPERATIONS.md) covers TLS and scoped credentials.
+Both imports and query embeddings reserve project budget before paid calls.
 Upload validates project/name, UTF-8, nonempty content, and size. It splits into 300-word chunks
 with 50-word overlap, then embeds every chunk. A transaction replaces the document's chunks
 and advances the project corpus revision. Embedding failure leaves the previous version active.
@@ -30,7 +30,8 @@ Redis Search filters project fingerprint and active status before ranking vector
 Retrieve at most four chunks with cosine similarity ≥0.80. Source excerpts are bounded to
 240 runes, plus a truncation marker.
 
-No match or retrieval failure continues ungrounded. Successful JSON responses include
+No match or ordinary retrieval failure continues ungrounded. Budget exhaustion and ledger failures
+reject paid work instead of becoming an ungrounded fallback. Successful JSON responses include
 `gateway.grounded`; grounded responses include source IDs/excerpts. Grounded streams send
 an initial `sources` event, then content deltas. `X-RAG-Grounded` reports grounding state.
 
@@ -60,7 +61,7 @@ is not proof of answer safety.
 
 Tests cover captured upstream messages, forged references, fallback, old-cache exclusion,
 and settlement. They prove wiring and serialization, not real-model attack resistance.
-See [ADR-0009](adr/0009-separate-gateway-policy-from-untrusted-input.md).
+See [architecture trust boundaries](ARCHITECTURE.md#trust-boundaries).
 
 ## Bounds
 
@@ -73,9 +74,15 @@ See [ADR-0009](adr/0009-separate-gateway-policy-from-untrusted-input.md).
 | Global in-flight requests per process | 16 |
 | Project in-flight requests per process | 4 |
 | Stream settlement after cancellation | 5s |
+| Chat JSON/error response | 1 MiB |
+| Embedding JSON response | 128 KiB |
+| Cumulative provider SSE | 4 MiB |
+| Project UTC-day token allowance | 100,000 |
+| Project UTC-day USD allowance | US$10 |
 
 `REQUEST_TIMEOUT`, `MAX_REQUEST_BODY_BYTES`, `MAX_CONCURRENT_REQUESTS`, and
-`MAX_CONCURRENT_PER_PROJECT` override runtime bounds. Output caps come from the model catalogue.
+`MAX_CONCURRENT_PER_PROJECT` override runtime bounds. Output caps come from the validated configured model catalogue. Budget limits have operator overrides.
+Embedding failures leave paid attempts in the ledger even when document replacement does not finish.
 [README settings](../README.md#settings) list configuration and limits.
 
 ## Source basis

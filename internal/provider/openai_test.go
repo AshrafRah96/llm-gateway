@@ -1,8 +1,11 @@
 package provider
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -160,6 +163,112 @@ func TestComplete_UpstreamStatusIsNotAnError(t *testing.T) {
 	}
 	if string(body) != `{"error":"slow down"}` {
 		t.Errorf("body = %s", body)
+	}
+}
+
+func TestComplete_ResponseBodyLimit(t *testing.T) {
+	const limit = 1 << 20
+	for _, status := range []int{http.StatusOK, http.StatusTooManyRequests} {
+		for _, size := range []int{limit, limit + 1} {
+			t.Run(fmt.Sprintf("status_%d_bytes_%d", status, size), func(t *testing.T) {
+				client, _ := upstream(t, status, strings.Repeat("x", size))
+				body, gotStatus, err := client.Complete(context.Background(), completion.ProviderInput{Question: "hello"}, router.Cheap)
+				if size == limit {
+					if err != nil || len(body) != limit || gotStatus != status {
+						t.Fatalf("exact limit: bytes=%d status=%d err=%v", len(body), gotStatus, err)
+					}
+					return
+				}
+				var tooLarge *http.MaxBytesError
+				if !errors.As(err, &tooLarge) || tooLarge.Limit != limit || body != nil {
+					t.Fatalf("overflow must fail explicitly without a partial response: bytes=%d err=%v", len(body), err)
+				}
+			})
+		}
+	}
+}
+
+func TestStream_CumulativeBodyLimit(t *testing.T) {
+	const limit = 4 << 20
+	const done = "data: [DONE]\n\n"
+	for _, overflow := range []bool{false, true} {
+		t.Run(fmt.Sprintf("overflow_%v", overflow), func(t *testing.T) {
+			padding := limit - len(done)
+			if overflow {
+				padding = limit + 4
+			}
+			body := strings.Repeat(": x\n", padding/4)
+			if padding%4 != 0 {
+				body += ":\n"
+			}
+			client, _ := upstream(t, http.StatusOK, body+done)
+			stream, _, err := client.Stream(context.Background(), completion.ProviderInput{Question: "hello"}, router.Cheap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Close()
+			event, ok := stream.Next()
+			if !overflow {
+				if !ok || !event.Done || stream.Err() != nil {
+					t.Fatalf("exact limit: event=%+v ok=%v err=%v", event, ok, stream.Err())
+				}
+				return
+			}
+			var tooLarge *http.MaxBytesError
+			if ok || event.Done || !errors.As(stream.Err(), &tooLarge) || tooLarge.Limit != limit {
+				t.Fatalf("ignored lines must count; overflow must not return Done: event=%+v ok=%v err=%v", event, ok, stream.Err())
+			}
+		})
+	}
+}
+
+func TestStream_ErrorBodyUsesJSONLimit(t *testing.T) {
+	const limit = 1 << 20
+	client, _ := upstream(t, http.StatusBadGateway, strings.Repeat(": x\n", limit/4+1))
+	stream, status, err := client.Stream(context.Background(), completion.ProviderInput{Question: "hello"}, router.Cheap)
+	if err != nil || status != http.StatusBadGateway {
+		t.Fatalf("Stream: status=%d err=%v", status, err)
+	}
+	defer stream.Close()
+	_, ok := stream.Next()
+	var tooLarge *http.MaxBytesError
+	if ok || !errors.As(stream.Err(), &tooLarge) || tooLarge.Limit != limit {
+		t.Fatalf("error response must use 1 MiB cap: ok=%v err=%v", ok, stream.Err())
+	}
+}
+
+func TestStream_OverflowCannotReturnBufferedDone(t *testing.T) {
+	const done = "data: [DONE]\n\n"
+	upstream := &trackedBody{Reader: strings.NewReader(done + ": trailing bytes\n")}
+	body := http.MaxBytesReader(nil, upstream, int64(len(done)))
+	stream := &openAIStream{body: body, scanner: bufio.NewScanner(body)}
+	defer stream.Close()
+	event, ok := stream.Next()
+	var tooLarge *http.MaxBytesError
+	if ok || event.Done || !errors.As(stream.Err(), &tooLarge) {
+		t.Fatalf("buffered Done cannot hide body overflow: event=%+v ok=%v err=%v", event, ok, stream.Err())
+	}
+}
+
+type trackedBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *trackedBody) Close() error {
+	b.closed = true
+	return nil
+}
+
+func TestStream_OverflowClosesUpstream(t *testing.T) {
+	upstream := &trackedBody{Reader: strings.NewReader(": x\n: x\n")}
+	body := http.MaxBytesReader(nil, upstream, 4)
+	stream := &openAIStream{body: body, scanner: bufio.NewScanner(body)}
+	if event, ok := stream.Next(); ok || event.Done || stream.Err() == nil {
+		t.Fatalf("overflow: event=%+v ok=%v err=%v", event, ok, stream.Err())
+	}
+	if !upstream.closed {
+		t.Fatal("overflow must close the upstream body immediately")
 	}
 }
 

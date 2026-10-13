@@ -2,247 +2,188 @@
 
 [![CI](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ashrafrah96/llm-gateway/actions/workflows/ci.yml)
 
-Go gateway for OpenAI: project authentication, Redis quotas, project RAG, semantic reuse,
-JSON/SSE delivery, and project usage totals.
+Go gateway for OpenAI: project keys, quotas, daily spend budgets, project RAG,
+semantic cache, JSON/SSE, and a separate persistent usage ledger.
 
-Reference implementation and portfolio project. See [implemented controls](docs/THREAT-MODEL.md)
-and [remaining work](docs/ROADMAP.md).
+Reference implementation. [Controls and limits](docs/THREAT-MODEL.md)
+· [Remaining work](docs/ROADMAP.md).
 
 ## Architecture
 
-[![LLM Gateway architecture: admission, completion, retrieval, prompt boundaries, provider, and Redis state](docs/diagrams/architecture.svg)](docs/diagrams/architecture.svg)
+[![Gateway: admission, completion, untrusted references, provider, vector cache and persistent ledger](docs/diagrams/architecture.svg)](docs/diagrams/architecture.svg)
 
-[Interactive Archify diagram](docs/diagrams/architecture.html)
-· [Architecture details](docs/ARCHITECTURE.md)
-· [Diagram source](docs/diagrams/architecture.json)
+[Interactive Archify viewer](docs/diagrams/architecture.html)
+· [Architecture](docs/ARCHITECTURE.md) · [Diagram source](docs/diagrams/architecture.json).
 
-The diagram includes the applied prompt-injection defenses. Its source evidence uses a
-frozen local snapshot of the current code. Download the HTML and open it in a browser;
-GitHub displays the SVG but does not run the interactive viewer.
+GitHub renders the SVG. Download the HTML to explore sources, themes, and exports.
+Diagram evidence pins a frozen local source snapshot; it does not claim a published commit.
 
 ## Request path
 
-1. Authenticate `X-API-Key`; derive project and key identity.
-2. Apply key quota, global/project concurrency caps, body limit, and deadline.
-3. Route the original question by length and keywords.
-4. Retrieve project-filtered reference material.
-5. Search cache by project, primary routed model, corpus revision, schema, and prompt policy.
-6. On a miss, send fixed system policy, encoded references, and separate user question to OpenAI.
-7. Settle usage and logs. Cache complete successful answers. Return JSON or SSE.
+1. Authenticate `X-API-Key`; derive project and fingerprint identity.
+2. Apply atomic key quota, process/project concurrency caps, body limit, and deadline.
+3. Route the original question. Retrieve project-filtered references and search the scoped cache.
+4. Reserve project budget before each embedding or chat attempt.
+5. On a cache miss, send fixed system policy, JSON-encoded references, and a separate question.
+6. Settle identified usage; cache complete success; return JSON or live SSE.
 
-Cache hits skip chat generation and usage increments. They still make embedding calls.
-Retrieval/cache errors allow an ungrounded completion or cache miss. Authentication/quota errors reject the request.
+Cache hits avoid chat charges. Retrieval/cache embeddings still consume budget and appear in `/usage`.
+Ordinary retrieval/cache errors permit ungrounded generation or a miss. Budget and ledger failures reject paid work.
 
-## Behavior
+| Capability | Rule |
+|---|---|
+| Key quota | Default 10 approvals per key per sliding minute; shared Redis Lua decision |
+| Project budget | Default 100,000 tokens and US$10 per UTC day; conservative per-operation reservation |
+| Routing | More than 500 bytes, or a complexity keyword, selects the powerful tier |
+| RAG | Reviewed text; authenticated project filter; at most four chunks at similarity ≥0.80 |
+| Cache | Similarity ≥0.95; project/model/schema/corpus/policy filter; default TTL 24h |
+| Prompt boundaries | Fixed system policy; references and question remain user data; shared JSON/SSE/fallback builder |
+| Failover | One distinct fallback on transport errors or HTTP 408/429/5xx before output; each attempt is charged |
+| Keys | Existing expiry-free keys preserved; new expiry 90 days; rotation overlap 24h by default |
+| Reads | Chat JSON/error 1 MiB; embedding JSON 128 KiB; cumulative SSE 4 MiB; SSE line 1 MiB |
 
-| Capability | Rule | Evidence |
-|---|---|---|
-| Quotas | Default 10 quota approvals per key per sliding minute; Redis Lua makes one atomic decision | [ADR-0003](docs/adr/0003-the-store-decides-the-rate-limit.md) |
-| Routing | Over 500 **bytes**, or a complexity keyword, selects the powerful tier | [ADR-0001](docs/adr/0001-keyword-routing-instead-of-a-classifier.md) |
-| RAG | Reviewed text only; authenticated project filter; up to four chunks at similarity ≥0.80 | [RAG](docs/RAG.md) |
-| Semantic cache | Similarity ≥0.95; namespace filters precede ranking; default TTL 24h | [ADR-0007](docs/adr/0007-isolate-semantic-cache-by-tenant-and-model.md) |
-| Prompt boundaries | One fixed system policy; references and question remain user data; shared JSON/SSE/fallback builder | [ADR-0009](docs/adr/0009-separate-gateway-policy-from-untrusted-input.md) |
-| Failover | One distinct configured fallback on transport errors, HTTP 408/429/5xx, before output | [Architecture](docs/ARCHITECTURE.md) |
-| Usage | Project totals for completion requests, tokens, USD cost, and estimated requests | [ADR-0006](docs/adr/0006-estimate-and-bill-abandoned-streams.md) |
+Default model IDs remain `gpt-3.5-turbo` and `gpt-4`. Their aliases are scheduled to shut down
+on 23 October 2026. Configure supported IDs with verified prices/output caps before deployment.
+Account availability remains untested. [OpenAI deprecations](https://developers.openai.com/api/docs/deprecations).
 
-Default routes: `gpt-3.5-turbo` and `gpt-4`. Fallback defaults equal the primary model,
-so retry occurs only when a distinct fallback is configured. Routing makes no classifier call.
-
-JSON and SSE share `internal/completion`. OpenAI wire framing stays in `internal/provider`;
-HTTP decoding and outbound SSE framing stay in `internal/handler`.
+Fallback defaults equal the primary model; retries require a distinct configured fallback.
+No routing classifier call occurs. No injection classifier, phrase blocklist, or output screening exists.
 
 ## Run
 
-Docker Compose starts the gateway and Redis Stack. Go 1.25+ is needed for operator commands.
+Go 1.25+, Docker Compose, and Redis Stack are required. Default Compose has private TLS Redis
+services, ACL credentials, separate persistent volumes, pinned images, and resource caps.
+Only gateway port `127.0.0.1:8080` is published. Operator ports need the development override.
 
 ```bash
-export OPENAI_API_KEY=sk-your-key
-export API_KEY_PEPPER='a-long-random-secret'
-export REDIS_ADDR=localhost:6379
-docker compose up -d --build
-export PROJECT_API_KEY="$(go run ./cmd/project-key -project demo)"
+go run ./cmd/deployment-init
+# Supply the provider key securely into .cache/deploy/openai_api_key.
+# The generated file is empty; no provider call occurs during initialization.
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+source .cache/deploy/operator.env
+go run ./cmd/project-key -project demo
 ```
 
-The key command prints the raw key once. Redis stores its HMAC fingerprint and project binding.
-Keep the pepper stable and store the key securely.
+The key command prints the raw key once. Save it securely and set `PROJECT_API_KEY` for requests.
+Keep the pepper stable. Changing it invalidates every fingerprint.
+Generated certificates are local development material. Production certificates, off-host backups,
+secret storage, and HTTPS ingress remain operator responsibilities. [Operations](docs/OPERATIONS.md).
 
-Gateway: port 8080. Redis: 6379. RedisInsight: 8001.
-Compose exposes Redis without ACL/TLS and declares no persistent volume. Use it for local development.
+Existing installations must stop old writers, migrate usage and key fingerprints, and verify
+balances before cutover. [Ledger and migration](docs/LEDGER.md). Startup rejects unmigrated legacy state.
 
-Direct Go startup, after starting Redis Stack and setting the same environment:
+Direct Go startup uses the same two stores:
 
 ```bash
+source .cache/deploy/gateway.env
 go run .
 ```
 
-Plain Redis cannot serve the cache/RAG vector indexes. Redis connectivity and index creation
-share a 10s startup budget. Shutdown has a 30s budget.
-
-Import reviewed UTF-8 text or Markdown:
-
-```bash
-go run ./cmd/rag-import -project demo -file docs/ARCHITECTURE.md
-```
-
-Standalone Docker image:
-
-```bash
-docker build -t llm-gateway .
-docker run -p 8080:8080 \
-  -e OPENAI_API_KEY \
-  -e API_KEY_PEPPER \
-  -e REDIS_ADDR=host.docker.internal:6379 \
-  llm-gateway
-```
-
-`host.docker.internal` assumes Docker Desktop. Use the Redis host reachable from your container.
+Startup has a 10s budget; shutdown 30s. Cache/RAG index creation is required.
+`/ready` checks ledger connectivity and both Search indexes. It does not call OpenAI.
 
 ## Endpoints
 
-| Method | Path | Key required | Result |
+| Method | Path | Key | Result |
 |---|---|---|---|
-| POST | `/chat` | yes | JSON completion with additive grounding metadata on success |
-| POST | `/chat/stream` | yes | Content-delta SSE; initial `sources` event when grounded |
-| GET | `/usage` | yes | Project completion usage totals |
-| GET | `/limits` | yes | Current key's quota status |
-| GET | `/models` | no | Compiled model catalogue and prices |
-| GET | `/health` | no | Liveness response; not dependency readiness |
+| POST | `/chat` | yes | JSON completion with grounding metadata |
+| POST | `/chat/stream` | yes | Content-delta SSE; initial sources event when grounded |
+| GET | `/usage` | yes | Lifetime chat, embedding, and combined project totals |
+| GET | `/limits` | yes | Current key's sliding-window quota status |
+| GET | `/models` | no | Configured model IDs, USD/1k-token prices, output caps |
+| GET | `/health` | no | Process liveness |
+| GET | `/ready` | no | Redis/Search readiness |
 
-All protected endpoints consume quota and pass request limits, including `/usage` and `/limits`.
-Quota approval happens before handler validation and concurrency checks; later rejection can still consume a slot.
-Requests contain only `{"prompt":"..."}`. Empty prompts, unknown fields, and oversized prompts are rejected.
+Protected status endpoints consume key quota. Quota approval precedes handler validation and concurrency checks.
+Requests accept only `{"prompt":"..."}`. Empty prompts, unknown fields, and excessive sizes fail.
 
 ```bash
 curl -i http://localhost:8080/chat \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $PROJECT_API_KEY" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $PROJECT_API_KEY" \
   -d '{"prompt":"What is the capital of France?"}'
-
 curl -N http://localhost:8080/chat/stream \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $PROJECT_API_KEY" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $PROJECT_API_KEY" \
   -d '{"prompt":"Explain quantum computing"}'
-
 curl http://localhost:8080/usage -H "X-API-Key: $PROJECT_API_KEY"
 ```
 
-Repeating the first prompt can hit the cache. Reworded prompts hit only when similarity
-and namespace checks pass.
+Headers: `X-Cache`, `X-Model` on misses, `X-RAG-Grounded`, `X-Model-Fallback`.
+Fallback metadata is set before grounded source events flush. `Retry-After` covers quota rejection
+and exhausted daily budget. Budget exhaustion returns 429; ledger failure returns 503.
+Other provider errors retain their status after fallback; transport errors become 502.
+SSE failures after headers use an error event and omit successful `[DONE]`.
 
-Response headers:
+## Accounting
 
-- `X-Cache`: `HIT` or `MISS`.
-- `X-Model`: model used on a miss; absent on hits.
-- `X-RAG-Grounded`: `true` or `false` when retrieval is enabled.
-- `X-Model-Fallback`: fallback marker. Grounded SSE may flush headers before this marker is set.
-- `Retry-After`: integer seconds on gateway quota rejection.
+Admission reserves UTF-8 message bytes plus framing allowance and the configured output cap.
+Integer nanodollars avoid floating-point ledger arithmetic. Lua updates events, totals, daily
+spend, and reservations atomically; duplicate event IDs cannot double-charge.
 
-Provider error statuses propagate after any configured fallback. Transport errors become 502.
+Provider counts settle known work. Missing usage, cancellation, timeout, or crashes retain the
+full reservation until audited reconciliation. Labelled estimates appear in lifetime totals;
+estimates can undercount actual tokens. A conservative reservation is separate from that estimate.
+Settlement outlives cancellation for at most 5s. Failure remains visible; partial answers never enter cache.
 
-## Streaming settlement
-
-Provider exhaustion settles usage, logs, and cache. Deferred `Close` uses the same
-idempotent path when the caller leaves early.
-
-Cancellation closes upstream work. Without final provider usage, estimate input from
-system policy, encoded references, and question; estimate output from received content.
-The estimate uses roughly four bytes per token and excludes exact chat-framing overhead.
-It is unreconciled and can undercount non-English text.
-
-Settlement outlives request cancellation but stops after 5s. Partial streams are never cached.
-Measured provider usage takes precedence. Estimates appear as `"estimated": true` in logs
-and increment `estimated_requests` in `/usage`:
-
-```json
-{
-  "requests": 1000,
-  "tokens_in": 45000,
-  "tokens_out": 90000,
-  "cost_usd": 12.34,
-  "estimated_requests": 3
-}
-```
-
-Usage is best effort, uses floating-point USD, and excludes embedding spend.
+`/usage` preserves `requests`, `tokens_in`, `tokens_out`, `cost_usd`, `estimated_requests`.
+It adds `embedding_requests`, `embedding_tokens`, `embedding_cost_usd`, `total_tokens`, `total_cost_usd`.
+Chat totals count attempts, including failed attempts with uncertain cost. Display USD fields are derived floats;
+ledger money uses integers. Totals describe configured-price accounting, not verified provider invoices.
 
 ## Settings
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OPENAI_API_KEY` | required | Provider key |
-| `API_KEY_PEPPER` | required | Project-key HMAC secret |
-| `REDIS_ADDR` | `localhost:6379` | Redis Stack address |
-| `CACHE_TTL` | `24h` | Response-cache lifetime |
-| `REQUEST_TIMEOUT` | `60s` | Request context deadline |
-| `MAX_REQUEST_BODY_BYTES` | `65536` | JSON body limit |
-| `MAX_CONCURRENT_REQUESTS` | `16` | In-flight cap per gateway process |
-| `MAX_CONCURRENT_PER_PROJECT` | `4` | Project in-flight cap per gateway process |
-| `CHEAP_MODEL` | `gpt-3.5-turbo` | Simple-question model ID |
-| `POWERFUL_MODEL` | `gpt-4` | Complex-question model ID |
-| `CHEAP_FALLBACK_MODEL` | cheap primary ID | Simple-tier fallback ID |
-| `POWERFUL_FALLBACK_MODEL` | powerful primary ID | Complex-tier fallback ID |
+| `OPENAI_API_KEY` / `_FILE` | required | Provider credential; set one source |
+| `API_KEY_PEPPER` / `_FILE` | required | Stable project-key HMAC secret |
+| `REDIS_ADDR` | `localhost:6379` | Vector/cache/quota Redis Stack |
+| `LEDGER_REDIS_ADDR` | `localhost:6380` | Separate persistent ledger Redis |
+| `CACHE_TTL` | `24h` | Cache lifetime |
+| `REQUEST_TIMEOUT` | `60s` | Request deadline |
+| `MAX_REQUEST_BODY_BYTES` | `65536` | Body bound; prompt bound remains 32768 bytes |
+| `MAX_CONCURRENT_REQUESTS` | `16` | Per-process in-flight cap |
+| `MAX_CONCURRENT_PER_PROJECT` | `4` | Per-project cap per process |
+| `CHEAP_MODEL` / `POWERFUL_MODEL` | `gpt-3.5-turbo` / `gpt-4` | Primary IDs |
+| `CHEAP_FALLBACK_MODEL` / `POWERFUL_FALLBACK_MODEL` | primary ID | Fallback IDs |
 
-Prompt limit: 32768 bytes. Model prices, output caps, quota defaults, and similarity thresholds
-remain compiled constants. Model-ID overrides inherit the tier's compiled prices/caps;
-`/models` still shows the compiled catalogue. Validate overrides before real billing.
+Both Redis prefixes support `USERNAME`, `PASSWORD` or `PASSWORD_FILE`, `TLS`, `TLS_CA`,
+`TLS_SERVER_NAME`, and paired `TLS_CERT`/`TLS_KEY`. Hostname and CA verification stay enabled.
 
-Compose passes the provider key, pepper, Redis address, and cache TTL. Add other settings
-to Compose or run directly when overriding them. `internal/application` validates configuration
-and owns Redis resources.
+Each route prefix (`CHEAP_`, `POWERFUL_`, `CHEAP_FALLBACK_`, `POWERFUL_FALLBACK_`) supports
+`PRICE_IN`, `PRICE_OUT` in USD/1k tokens and `MAX_OUTPUT_TOKENS`. Unknown IDs require all three.
+Known IDs use their matching catalogue prices. Contradictory pricing/caps for one ID fail startup.
+Operator `usage-admin -action limits` sets daily project limits. [Operations](docs/OPERATIONS.md).
 
 ## Verify
 
-```bash
-go test ./...
-```
-
-Redis-backed tests skip when Redis/Search is unavailable. Run all checks with Redis Stack:
+CI builds, vets, checks formatting, and runs race tests against digest-pinned Redis Stack.
+It rejects integration skips and runs unpaid TLS/ACL/readiness/backup/isolated-restore checks.
+Local evidence: [verification record](docs/verification/local-checks.json).
 
 ```bash
-docker run --rm -d --name llm-gateway-test-redis \
-  -p 6379:6379 redis/redis-stack-server:latest
 go build ./...
 go vet ./...
 REDIS_ADDR=localhost:6379 go test -race -count=1 ./...
-docker stop llm-gateway-test-redis
 ```
 
-Use a free port or an existing Redis Stack instance if Compose already owns 6379.
-CI builds, vets, checks formatting, runs race tests, and rejects skipped Redis-backed tests.
-
-[The evaluator](docs/EVALUATION.md) measures a committed 40-case English corpus with paid embeddings.
-Targets: precision ≥95%, recall ≥80%. The opt-in smoke command checks real JSON, cache,
-SSE, cancellation, and usage paths. No measured evaluation or smoke report is committed yet.
+Redis-backed tests skip without Redis/Search. A skipped test provides no evidence.
+[Evaluation](docs/EVALUATION.md) describes paid smoke/cache/adversarial commands.
+[Prepared adversarial plan](docs/evaluation/adversarial-prepared-v1.md) is explicitly unmeasured.
+No paid calls were authorized for this change; live-model resistance and invoice agreement remain unknown.
 
 ## Code map
 
-| Package | Responsibility |
+| Package | Owns |
 |---|---|
-| `internal/application` | Configuration, composition, owned resources |
-| `internal/auth` | Project-key fingerprints and lookup |
-| `internal/middleware` | Authentication, quotas, body/deadline/concurrency limits |
-| `internal/handler` | HTTP decoding, JSON, outbound SSE, read endpoints |
-| `internal/completion` | Shared lifecycle, trusted prompt builder, settlement |
-| `internal/provider` | OpenAI HTTP and provider-neutral SSE events |
-| `internal/router` | Model catalogue, pricing, deterministic route |
-| `internal/rag` | Reviewed document ingestion and project retrieval |
-| `internal/cache` | Embeddings, semantic lookup, response storage |
-| `internal/ratelimit` | Redis/in-memory sliding-window stores |
-| `internal/usage` | Project token/cost totals |
-| `internal/observability` | Token parsing and structured request logs |
-| `internal/evaluation` | Corpus validation and classification metrics |
-| `internal/evidence` | Evaluation provenance and report writes |
+| `application` | Configuration, composition, two owned Redis clients, readiness |
+| `auth` / `middleware` | Fingerprints, key lifecycle, admission and request bounds |
+| `handler` | HTTP decoding, JSON, outbound SSE, status endpoints |
+| `completion` | Shared lifecycle, trusted messages, per-attempt chat metering |
+| `provider` / `router` | OpenAI framing, response bounds, configured catalogue |
+| `rag` / `cache` | Reviewed documents, scoped vectors, metered embeddings |
+| `usage` / `money` | Reservations, events, reconciliation, exact money |
+| `redisconfig` | Scoped credentials and verified TLS options |
+| `ratelimit` / `observability` | Sliding quotas and structured request logs |
+| `evaluation` / `adversarial` / `evidence` | Opt-in gates, provenance, reports |
 
-Operator commands: `project-key`, `rag-import`, `cache-eval`, `provider-smoke` under `cmd/`.
-Review [provider events](internal/provider/openai.go), [settlement](internal/completion/stream.go),
-[prompt boundaries](internal/completion/input.go), and [atomic quota decisions](internal/ratelimit/redis.go).
-
-## Limits and decisions
-
-- Structural prompt defenses reduce risk; no classifier, phrase blocklist, or output screening exists.
-- Payload tests prove message boundaries, not real-model attack resistance.
-- Semantic quality and keyword routing remain corpus/traffic dependent.
-- Spend budgets, durable accounting, key rotation, and production Redis hardening remain open.
-
-[Decision records](docs/adr/README.md) preserve tradeoffs.
-[Engineering notes](docs/ENGINEERING-NOTES.md) explain the quota and streaming billing regressions.
+Commands: `deployment-init`, `project-key`, `usage-admin`, `rag-import`, `cache-eval`,
+`provider-smoke`, `adversarial-eval`. [Engineering notes](docs/ENGINEERING-NOTES.md).

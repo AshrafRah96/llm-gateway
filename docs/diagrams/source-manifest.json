@@ -1,23 +1,55 @@
 {
-  "base_revision": "2759e01c6c9c63dccf01f7be9523c981066f98eb",
-  "snapshot_revision": "49c1c6aab75c68f67281941060cd909501db9fd5",
+  "base_revision": "378c5b3f0bde7b04085d5d9b4a537803194cbab8",
+  "snapshot_revision": "8154d082600eeaea0ba8a9db1feab28544bfe8f2",
   "repository": "https://github.com/AshrafRah96/llm-gateway.git",
   "source_files": [
     {
+      "path": ".dockerignore",
+      "sha256": "5d2cc3a41fcf20e9a6f5314379b6e0d072e7a76fde6d069630745430875cf74b"
+    },
+    {
       "path": ".github/workflows/ci.yml",
-      "sha256": "ebb0760bc32347f1f01a5fb21cd9468d298b7569bde4def51dd7b7ae77972518"
+      "sha256": "027a4e38deca0603c9a1d24f499fc8fefabf2a4d90060fd48f844e0d2fe051f5"
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "163812041d17171ef3871200540ccf9234147f9e2acc98cf1e9c41fe7ac35d0b"
     },
     {
       "path": "Dockerfile",
-      "sha256": "409ef60c97e84f92662624a387ed7a195f1a65b7a5e6e25c0ecde38344f09933"
+      "sha256": "c8ffbf5b2e7c6736e0274625b069f0e4041040c0fb804ef2c332b750e51d4f67"
+    },
+    {
+      "path": "GLOSSARY.md",
+      "sha256": "130c5df3ab3992f11bcfbd532719b18b045bebf67f38d54434d6462c3f3d6732"
+    },
+    {
+      "path": "README.md",
+      "sha256": "82772fd03d25d6dc3bdf5b87f2d47c45d56f4e91cb5ddc6c3669240d00ab3046"
+    },
+    {
+      "path": "cmd/adversarial-eval/main.go",
+      "sha256": "8c80b66b6467741c8d88cae773651eaa0d6e43ba0c878f386419a50c994810fe"
+    },
+    {
+      "path": "cmd/adversarial-eval/main_test.go",
+      "sha256": "72941b13530ec92929deb7d53ed1cdee5352917193574ad16c4e0650b971c96f"
     },
     {
       "path": "cmd/cache-eval/main.go",
-      "sha256": "633b66695c76c6c6990e38f75d2f9ca83d78cebf37c11aa89aee1a5ae7b67317"
+      "sha256": "ff9f1ca8ad31912d68124fc0eb0f06dbcffc2eebdcdaf94ba5cf606e452d19e1"
+    },
+    {
+      "path": "cmd/deployment-init/main.go",
+      "sha256": "38d1c42e18b216bb69b5ae249943b8b25a7c196c843f18da0dae4aa201c24765"
+    },
+    {
+      "path": "cmd/deployment-init/main_test.go",
+      "sha256": "693271c0b518307a8f487c9ae4d52d6bfb03378bc2c6a644e6fb94ce9ba7915d"
     },
     {
       "path": "cmd/project-key/main.go",
-      "sha256": "898904431b1db9ef8a8f541eb8a7f4775324d53228b2f846edd69df0f9bbb5a9"
+      "sha256": "8128efb63567819bb81b7b23b35b60910ab98fa64c8511082686ea692b9d5d9b"
     },
     {
       "path": "cmd/provider-smoke/main.go",
@@ -25,11 +57,79 @@
     },
     {
       "path": "cmd/rag-import/main.go",
-      "sha256": "bffff724556aae8fea18abac39d3c66b5ce01702708428b101202fec0a58787b"
+      "sha256": "dd5349b6b99b6f93b70d305491d99498ef14d448aca7a6697ab7acc1e44bc893"
+    },
+    {
+      "path": "cmd/usage-admin/main.go",
+      "sha256": "d2817e9dfacf0d3d5b7f2cc49df09d7f0dc918aaddd8650a33efdfb46a62af3b"
+    },
+    {
+      "path": "deployment/cache.conf",
+      "sha256": "e5706ef316f48e8b3ee315c7ee23457897f6e148522849821a6c179b61077046"
+    },
+    {
+      "path": "deployment/ledger.conf",
+      "sha256": "5dabaa54e363d60c0e520d79164373b17adc6265762ddb481a8eed7c946fa8a8"
+    },
+    {
+      "path": "docker-compose.dev.yml",
+      "sha256": "f4c40df6964624bf2cf089223d2f253501bd721e12e241116a04e4c5328b4729"
     },
     {
       "path": "docker-compose.yml",
-      "sha256": "1e81b89b8548e66221fe05f1035c1ec639460dadbda6846653c3164d22fc6605"
+      "sha256": "941773d38f76d7fd275e248ff07694d4976a8c362236fc3bbeb1ad1e7b2aa4dc"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "sha256": "fb0393cbb82117fbb49c81cfa45a77458756f9fc351a043a606bf5a42fdda1c6"
+    },
+    {
+      "path": "docs/ENGINEERING-NOTES.md",
+      "sha256": "5ab3421d4829934e4448df3357fde9f48e816359ecc91d90ef34936aec2b5ff7"
+    },
+    {
+      "path": "docs/EVALUATION.md",
+      "sha256": "6083eda650563b9a0c01dbda3c5944243c59bfcd2e6b26fc9e8ed80665f2c7bb"
+    },
+    {
+      "path": "docs/LEDGER-RECOVERY.md",
+      "sha256": "7711f4c06d33aa32ae446f0e7b84057c9d903f8f97f27cbf75839092c5b1f0e6"
+    },
+    {
+      "path": "docs/LEDGER.md",
+      "sha256": "f7c9ca86797d85b2904a754b5f7d1f26d9d48fefc644574286d19187809cc15a"
+    },
+    {
+      "path": "docs/OPERATIONS.md",
+      "sha256": "23296dfa81f908ef8e044e874dda16c0f7cb3dd4d0a316b23bb95bfcf43d8805"
+    },
+    {
+      "path": "docs/RAG.md",
+      "sha256": "d9d146bd98e50ae26778e9146e3f252d12b7ba34bc86c2a6a2426a5b2789f650"
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "sha256": "79b8d4d6db5662f3a057fa087b229c9ee9e884e96ccb31fa6b6a47331aef3c53"
+    },
+    {
+      "path": "docs/THREAT-MODEL.md",
+      "sha256": "96498a99f0b7eac395903b57b7e1c5eaf5918e81b4dcf309cd047ccb8e67b917"
+    },
+    {
+      "path": "docs/evaluation/adversarial-cases-v1.json",
+      "sha256": "65ea4745aa967852d98de29e5cbb5b84b7cf9609e04e01e880dfebc1a3964dc2"
+    },
+    {
+      "path": "docs/evaluation/adversarial-prepared-v1.json",
+      "sha256": "6dbc2f62121f4726463c96d73262995dce4d1911089ec0354c09bd9a737d89fa"
+    },
+    {
+      "path": "docs/evaluation/adversarial-prepared-v1.md",
+      "sha256": "2b28416367c6fab4dda5ca23a4d26d14ede33850eff129b89dbea98ad446ba73"
+    },
+    {
+      "path": "docs/evaluation/cases-v1.json",
+      "sha256": "d492bbd5383f28e717b0ded75184b8687a71683e3a4055cdf75d1a715a7d1e45"
     },
     {
       "path": "go.mod",
@@ -40,24 +140,48 @@
       "sha256": "b8d1db338f382174ceb098fc95a164f66c5ec26ad3595245bce165d0da539163"
     },
     {
+      "path": "internal/adversarial/evaluation.go",
+      "sha256": "757a62fe1c540bfc1e6b78684debc340ffc4c326ee59cd571fcc7520e6639536"
+    },
+    {
+      "path": "internal/adversarial/evaluation_test.go",
+      "sha256": "fd0ffb333b97b1cb0ca2d611b152b5505607efd8602eb7aecb41515b8db609d4"
+    },
+    {
       "path": "internal/application/application.go",
-      "sha256": "22a0118df2ffb28f08cd8c3176281336046119afaf9fabd14cd49359d7f063f4"
+      "sha256": "244f3e9f369f4be610afd5fbf016aca3fcc1f65dc623e8c0b51bcd9107b90070"
     },
     {
       "path": "internal/application/application_test.go",
-      "sha256": "9e2d849339dc29bf1a2b783d77059a78c9c980c3096a9424f2626ebaec72cdbd"
+      "sha256": "a453ad43536f8531d25c78e7c981ece9da2a6e5bce740c1782fb650e352640e4"
+    },
+    {
+      "path": "internal/application/deployment_integration_test.go",
+      "sha256": "9d56903ef16524d59959cd4308b19f44feba351304e88a8ab9bb6c713638d952"
     },
     {
       "path": "internal/auth/keystore.go",
-      "sha256": "ed67cd87676b0498c9048978aa01e56d7fb53f4decb0783586b3353e0e7447c1"
+      "sha256": "57ca3b4a7bc42bd1dd5f7c022a16ea52c168ea71717c26939ae8a72c4e0156b6"
     },
     {
       "path": "internal/auth/keystore_test.go",
-      "sha256": "00f9752d871da7584ced8e62e11e0673aabc4ae1340ab3ce6c09881f8d8d02b1"
+      "sha256": "2864ef26d5797c904ce1638b69f4324e4b240ce23a4b837a05d2688a8e798df6"
+    },
+    {
+      "path": "internal/auth/migration.go",
+      "sha256": "4b9ea5848cc85695629f5d2a642fc41dd1f8556245850e6803bce2a6ecab1c50"
+    },
+    {
+      "path": "internal/auth/migration_test.go",
+      "sha256": "e2b3249f9a159a5883e15906e728fac3274d2806e00e6eff6872a78e251fafb4"
     },
     {
       "path": "internal/cache/embeddings.go",
-      "sha256": "91177e4c31fc8c67c03086f021e607bad6247170c95c421a154195ef0742c966"
+      "sha256": "ff8963d46c4d1dc14b18e2ebf3aa7728ce4f5ac8e9ab07ae7ed3de8d9c6d5133"
+    },
+    {
+      "path": "internal/cache/embeddings_test.go",
+      "sha256": "3cf9dfe55064ac6e57d815f346d44492f4d967283a840a4d41cf9135a23b2a0e"
     },
     {
       "path": "internal/cache/namespace.go",
@@ -77,7 +201,7 @@
     },
     {
       "path": "internal/completion/completion.go",
-      "sha256": "e1df8fa1f398d5d03eb598e7e0eed90182b10187c374bc3374efe9dae6992d12"
+      "sha256": "c87617faeb00b34abdcd6c8ba0ff71384a1b493279763773e82f06e84b0c33da"
     },
     {
       "path": "internal/completion/completion_test.go",
@@ -85,7 +209,15 @@
     },
     {
       "path": "internal/completion/input.go",
-      "sha256": "2d53149e63810f03d7bc3f16a56bf3500789ff517d78f0bd227736f41797ce59"
+      "sha256": "16d8e21f8ad0f459cb740ffe4c59871bf66bd22acd8ec8fe3629758ac30f8424"
+    },
+    {
+      "path": "internal/completion/metered.go",
+      "sha256": "c5f17b9c79f0910fa0cf7acfdfad702544be58165598ac7c2df7609d6fd87d23"
+    },
+    {
+      "path": "internal/completion/metered_test.go",
+      "sha256": "fdc3ac0082c409dd35f3fc98c848cea6687b210eb6895ed36381b73e77d83fd1"
     },
     {
       "path": "internal/completion/policy_integration_test.go",
@@ -93,11 +225,11 @@
     },
     {
       "path": "internal/completion/stream.go",
-      "sha256": "7639092584ec5c021cc164711d315ba6b186f566fa686fc3e3c1845f56432883"
+      "sha256": "0d9d3a03406e85b8404c5cd47064938b46d0d50371b616001dfff4884106f937"
     },
     {
       "path": "internal/completion/stream_test.go",
-      "sha256": "a8a3b9ed4128972b7b5c5af4609b72b591f531dc9903dcd1e861e38d5ce66fe3"
+      "sha256": "e756aa2b7e2a6f66f390ff16284b7d643f5b856aabf2733c2cc52ffd73e78756"
     },
     {
       "path": "internal/evaluation/evaluation.go",
@@ -121,11 +253,11 @@
     },
     {
       "path": "internal/handler/chat.go",
-      "sha256": "0aed70260843be58d0ce725d96e42b850f172d895a53558963ebd5e48718f941"
+      "sha256": "56169cc306588a957eecbe2894aa14f4368d5ca908e8411c0edd67f61bdaa83b"
     },
     {
       "path": "internal/handler/chat_test.go",
-      "sha256": "b9e328ffcb1582f090a166fb28ce5a7fd71fa1cd19bf08525b0c05fe48e1747f"
+      "sha256": "30e06307c813bd6dfa3c3395c1588a7dd03e222550bcf0a7431796c7ac8f5f1a"
     },
     {
       "path": "internal/handler/endpoints_test.go",
@@ -133,15 +265,15 @@
     },
     {
       "path": "internal/handler/limits.go",
-      "sha256": "b679438424a3dd5d708eabfedd7de93cb60e4f31cd9f885021c355ddffede887"
+      "sha256": "c1c8a127d7da1acb38db443f3ed2f50c2288196a419e7e0b47b18abee4c1bac0"
     },
     {
       "path": "internal/handler/models.go",
-      "sha256": "c27177fb31e0ca54f9b81989a417b82332cf5dfc23f6a6a206c5a417079b99ca"
+      "sha256": "e1ae16046ed06efd1264b8083e963f676215d3acdd3311fbcc6bf8571fde450e"
     },
     {
       "path": "internal/handler/stream.go",
-      "sha256": "3bb192d76bf65d751c59b7cc1e462f5844bb7d2bb2b52f3caf9860c0e5e4b915"
+      "sha256": "92bb890b26b1a7837773483aff389af34ee99a3bbd5706b68bf11143c9758417"
     },
     {
       "path": "internal/handler/usage.go",
@@ -165,11 +297,19 @@
     },
     {
       "path": "internal/middleware/ratelimit.go",
-      "sha256": "9afe21f1e15b3d2680ea76ab7303db0d67c0c3d3f7f9b6315811133b237768f4"
+      "sha256": "ab633a02ed97e554ab6b27685309a19f12f7e9c511a22e5544758813b8f3da6f"
     },
     {
       "path": "internal/middleware/ratelimit_test.go",
       "sha256": "0396ef32ee769322d5ccff37c38cf3265f902f50eb672ee62027608e3ffa1cfe"
+    },
+    {
+      "path": "internal/money/money.go",
+      "sha256": "841dbf0dbc8b15a65f9cbbdd2197c44572463fdd1d489f3257f84c38ab5a8ee1"
+    },
+    {
+      "path": "internal/money/money_test.go",
+      "sha256": "b0196993322dbdc2201b441df015e023bc216d177b53ac545f774396953d15bb"
     },
     {
       "path": "internal/observability/logger.go",
@@ -185,11 +325,11 @@
     },
     {
       "path": "internal/provider/openai.go",
-      "sha256": "14f62625b377fe36c289a444eacd15be5aca99231ad6f208b05f9938b6724628"
+      "sha256": "02f631b62aa3ca8d80b8c82b1f3156eea2e6290c3a82565143690267dadec4dd"
     },
     {
       "path": "internal/provider/openai_test.go",
-      "sha256": "568cd49489f87ac37c504b593bc841cfa1c65d3bf02a0b62572246c97b814f8a"
+      "sha256": "95c5853d6027058b93aee7d85e9c8e9eca94d61065783aeec567aa949dc0677b"
     },
     {
       "path": "internal/rag/rag.go",
@@ -224,8 +364,16 @@
       "sha256": "46dd8e8bd89e0379f4b20cddc9b10ad6d7ca9dffbc4984ecdac854e598db85d4"
     },
     {
+      "path": "internal/redisconfig/config.go",
+      "sha256": "0587ccc7205ccf4275479663be73e2ab70e13662c622e05c264c8f0d4242bcb2"
+    },
+    {
+      "path": "internal/redisconfig/config_test.go",
+      "sha256": "0f905e69b326c34d7db7a28d480ac3492695793fda4430eb8f55976cfd42eead"
+    },
+    {
       "path": "internal/router/model.go",
-      "sha256": "e86c9017dba70a9e0843861663df17f87db5d91f36bf05f3aae949afbaced629"
+      "sha256": "21d06fb7e728e32f9c8355e6f60e1488dc35c7264bc402c3e1b3288901eb78d1"
     },
     {
       "path": "internal/router/model_test.go",
@@ -233,55 +381,124 @@
     },
     {
       "path": "internal/router/router.go",
-      "sha256": "ce92be927f155169093b9cfe4390acbbe1e21f69bc41d760469f304a242bc967"
+      "sha256": "164a59bd53c09194141bff6db918f7af09929a419e026c563d15957d8c542a60"
     },
     {
       "path": "internal/router/router_test.go",
       "sha256": "702acfa351d84ad72fccfece1708e570afc5adafb0c0914ed8c86cadcd07f1a0"
     },
     {
+      "path": "internal/usage/context.go",
+      "sha256": "4e61986f3c57f70194d462b7d836b1a76350dff25f8d825c10105bae395edd8b"
+    },
+    {
+      "path": "internal/usage/ledger_test.go",
+      "sha256": "7233876894e6d9a9b3d4f153068948250f09c71c7918329a8b52c76bf059ba03"
+    },
+    {
+      "path": "internal/usage/reconcile.go",
+      "sha256": "030b6a090677bb2dc71e50adb3d4d1e6a2615d5feb23e97e6d8087fe36fef5d7"
+    },
+    {
+      "path": "internal/usage/scripts.go",
+      "sha256": "04cb802f8b6856c66106848d4c22ec0fdf70291e239f4d189bd14835afdc1457"
+    },
+    {
       "path": "internal/usage/tracker.go",
-      "sha256": "c145ffda940c97defeea9e59e493fcc20b8edb09df85b07af17e427f990ceb3f"
+      "sha256": "283e4f5b7cfefdb585a8e6341add4a4e20d92f993e0860ef05dd2e8db5779c10"
     },
     {
       "path": "internal/usage/tracker_test.go",
-      "sha256": "c2f2b0556d7c41283783de65635b8cf3810609ff7aac982b013bb475499270b6"
+      "sha256": "fc44bbe19d94fa19690411caa04029f4dfe21be5eab44d3dea4ee2bc7c7d3cab"
     },
     {
       "path": "main.go",
       "sha256": "50cd094aa8916990dba2f4b4d17bef2a88f55b8fd135b8d5eb9427776406526d"
+    },
+    {
+      "path": "scripts/ledger-backup.sh",
+      "sha256": "6befd0b24969b96b7ac43e2d06a5bdbff9847b7a485b01644dee022cc32d7c48"
+    },
+    {
+      "path": "scripts/ledger-restore-check.sh",
+      "sha256": "83be354bc19dee37b719411c65dc088fe049c0f0b2646b1de60d305cdfed504e"
     }
   ],
+  "snapshot_is_separate_local_commit": true,
   "working_tree_changes": [
+    " M .dockerignore",
     " M .github/workflows/ci.yml",
+    " M Dockerfile",
     " M GLOSSARY.md",
     " M README.md",
+    " M cmd/cache-eval/main.go",
+    " M cmd/project-key/main.go",
+    " M cmd/rag-import/main.go",
+    " M docker-compose.yml",
     " M docs/ARCHITECTURE.md",
     " M docs/ENGINEERING-NOTES.md",
     " M docs/EVALUATION.md",
     " M docs/RAG.md",
     " M docs/ROADMAP.md",
     " M docs/THREAT-MODEL.md",
-    " M docs/adr/0001-keyword-routing-instead-of-a-classifier.md",
-    " M docs/adr/0002-cache-on-meaning-not-exact-text.md",
-    " M docs/adr/0003-the-store-decides-the-rate-limit.md",
-    " M docs/adr/0004-millisecond-scores-in-the-lua-script.md",
-    " M docs/adr/0005-one-module-for-a-chat-request.md",
-    " M docs/adr/0006-estimate-and-bill-abandoned-streams.md",
-    " M docs/adr/0007-isolate-semantic-cache-by-tenant-and-model.md",
-    " M docs/adr/0008-portfolio-evidence-gates.md",
-    " M docs/adr/README.md",
+    " M docs/diagrams/README.md",
+    " M docs/diagrams/architecture.browser-check.json",
+    " M docs/diagrams/architecture.delivery.json",
+    " M docs/diagrams/architecture.finalize-summary.json",
+    " M docs/diagrams/architecture.finalize.json",
+    " M docs/diagrams/architecture.html",
+    " M docs/diagrams/architecture.json",
+    " M docs/diagrams/architecture.svg",
+    " M docs/diagrams/export-receipt.json",
+    " M docs/diagrams/source-manifest.json",
+    " M docs/diagrams/source.bundle",
+    " M docs/diagrams/visual-review.json",
+    " M internal/application/application.go",
+    " M internal/application/application_test.go",
+    " M internal/auth/keystore.go",
+    " M internal/auth/keystore_test.go",
+    " M internal/cache/embeddings.go",
     " M internal/completion/completion.go",
-    " M internal/completion/completion_test.go",
+    " M internal/completion/input.go",
     " M internal/completion/stream.go",
+    " M internal/completion/stream_test.go",
+    " M internal/handler/chat.go",
     " M internal/handler/chat_test.go",
+    " M internal/handler/limits.go",
+    " M internal/handler/models.go",
+    " M internal/handler/stream.go",
+    " M internal/middleware/ratelimit.go",
     " M internal/provider/openai.go",
     " M internal/provider/openai_test.go",
-    " M internal/rag/rag.go",
-    " M internal/rag/rag_test.go",
-    "?? .archify/",
-    "?? docs/adr/0009-separate-gateway-policy-from-untrusted-input.md",
-    "?? internal/completion/input.go",
-    "?? internal/completion/policy_integration_test.go"
+    " M internal/router/model.go",
+    " M internal/router/router.go",
+    " M internal/usage/tracker.go",
+    " M internal/usage/tracker_test.go",
+    "?? cmd/adversarial-eval/",
+    "?? cmd/deployment-init/",
+    "?? cmd/usage-admin/",
+    "?? deployment/",
+    "?? docker-compose.dev.yml",
+    "?? docs/LEDGER-RECOVERY.md",
+    "?? docs/LEDGER.md",
+    "?? docs/OPERATIONS.md",
+    "?? docs/evaluation/adversarial-cases-v1.json",
+    "?? docs/evaluation/adversarial-prepared-v1.json",
+    "?? docs/evaluation/adversarial-prepared-v1.md",
+    "?? docs/verification/",
+    "?? internal/adversarial/",
+    "?? internal/application/deployment_integration_test.go",
+    "?? internal/auth/migration.go",
+    "?? internal/auth/migration_test.go",
+    "?? internal/cache/embeddings_test.go",
+    "?? internal/completion/metered.go",
+    "?? internal/completion/metered_test.go",
+    "?? internal/money/",
+    "?? internal/redisconfig/",
+    "?? internal/usage/context.go",
+    "?? internal/usage/ledger_test.go",
+    "?? internal/usage/reconcile.go",
+    "?? internal/usage/scripts.go",
+    "?? scripts/"
   ]
 }

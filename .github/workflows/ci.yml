@@ -15,7 +15,7 @@ jobs:
       redis:
         # The cache integration tests execute FT.SEARCH; plain Redis would make the
         # project's headline feature skip silently.
-        image: redis/redis-stack-server:latest
+        image: redis/redis-stack-server@sha256:798ab84d9f266936b034ab11c4d04a2b8e4b441884c5aa7d17ac951eefdf742a
         ports:
           - 6379:6379
         options: >-
@@ -61,3 +61,16 @@ jobs:
             echo "Redis-backed tests were skipped; the service is not reachable"
             exit 1
           fi
+
+      - name: Verify hardened local deployment (no provider calls)
+        run: |
+          go run ./cmd/deployment-init
+          docker compose -p llmgw-ci -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+          docker compose -p llmgw-ci -f docker-compose.yml -f docker-compose.dev.yml up -d --wait redis ledger
+          HARDENED_TEST_DIR="$PWD/.cache/deploy" go test -race -tags deployment -count=1 ./internal/application
+          sh scripts/ledger-backup.sh llmgw-ci .cache/ledger-backups
+          sh scripts/ledger-restore-check.sh .cache/ledger-backups/*.rdb
+
+      - name: Clean isolated deployment
+        if: always()
+        run: docker compose -p llmgw-ci -f docker-compose.yml -f docker-compose.dev.yml down -v

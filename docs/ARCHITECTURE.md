@@ -1,122 +1,108 @@
 # Architecture
 
-Go HTTP gateway. OpenAI handles embeddings and chat. Redis Stack holds access, vector,
-and usage state. All Redis boxes in the diagram represent one configured instance.
+Go HTTP gateway. OpenAI processes chat and embeddings. Redis Stack owns disposable vectors,
+RAG content, and quotas. A separate persistent Redis process owns keys, money, and budgets.
 
 [![Current gateway architecture](diagrams/architecture.svg)](diagrams/architecture.svg)
 
-[Interactive Archify viewer](diagrams/architecture.html)
-· [Diagram source](diagrams/architecture.json)
+[Interactive Archify viewer](diagrams/architecture.html) · [Diagram source](diagrams/architecture.json).
 
 ## Request lifecycle
 
-1. Authenticate key; carry non-secret project/key identity.
-2. Apply key quota, process-wide and project concurrency caps, body limit, and deadline.
-3. Route the original question.
-4. Retrieve project-filtered chunks; errors or no match continue ungrounded.
-5. Embed the question and search the scoped response cache; errors become misses.
-6. A hit returns/replays stored content without chat generation or usage increments.
-7. A miss builds trusted system policy, encoded reference data, and a separate question.
-8. Call the primary model; try one distinct configured fallback on eligible pre-output failures.
-9. Meter, log, cache complete success, and return JSON or SSE.
+1. Authenticate project key from the ledger; apply quota and bounded request admission.
+2. Route the original question. Retrieve project-filtered references.
+3. Reserve budget before retrieval/cache embeddings; search the scoped response cache.
+4. A hit replays complete content without chat generation; embedding spend still counts.
+5. A miss builds fixed system policy, encoded reference data, and a separate question.
+6. Reserve before each chat attempt; try one distinct configured fallback before output when eligible.
+7. Record usage, log, cache complete success, and return JSON or live SSE.
 
-RAG and cache make separate embedding calls, including on cache hits. Usage totals meter
-chat completions, not embedding spend.
+Ordinary retrieval failures continue ungrounded; cache errors become misses. Budget errors propagate
+from both paths. No fallback starts after budget failure, cancellation, or emitted content.
 
 ## Ownership
 
 | Module | Responsibility |
 |---|---|
-| `application` | Validate environment, create indexes, own Redis, compose server |
-| `auth` | HMAC key lookup and project principal |
-| `middleware` | Admission gates and request bounds |
-| `handler` | HTTP decoding, response metadata, outbound SSE |
-| `completion` | Route/retrieve/cache/provider policy, message builder, usage settlement |
-| `router` | Model catalogue, prices, deterministic primary/fallback decision |
-| `rag` | Validate/chunk/embed reviewed documents; project-filtered retrieval |
-| `cache` | Prompt embedding, scoped vector lookup, TTL storage |
-| `ratelimit` | Atomic Redis Lua decision; in-memory adapter for tests |
-| `provider` | OpenAI HTTP; decode wire SSE into neutral events |
-| `usage` | Redis project aggregates |
-| `observability` | Parse tokens and emit structured logs |
-| `evaluation` / `evidence` | Opt-in measurements, provenance, reports |
+| `application` | Validate catalogue/TLS/configuration; own two Redis clients and indexes; readiness |
+| `auth` | HMAC lookup, expiry/revocation/rotation, legacy fingerprint migration |
+| `middleware` / `ratelimit` | Admission bounds and atomic shared key quotas |
+| `handler` | Decode HTTP, emit JSON/SSE and metadata, status endpoints |
+| `completion` | Shared lifecycle, trusted messages, per-attempt chat metering |
+| `router` / `provider` | Configured prices/caps, route/fallback, bounded OpenAI wire reads |
+| `rag` / `cache` | Reviewed ingestion, project vectors, response TTLs, metered embeddings |
+| `usage` / `money` | Atomic reservations/events/aggregates, integer charges, migration/reconciliation |
+| `redisconfig` | Scoped credentials and verified TLS configuration |
+| `observability` | Structured request logs and labelled estimates |
+| `evaluation` / `adversarial` / `evidence` | Opt-in gates, provenance and reports |
 
-`/chat` and `/chat/stream` share one private lifecycle. Normal exhaustion settles streams;
-`Close` is the idempotent abandonment fallback. HTTP owns SSE encoding; provider owns wire decoding.
+JSON and SSE share one lifecycle. Provider decoding remains separate from outbound SSE encoding.
+Normal exhaustion and idempotent `Close` share settlement; close failures suppress caching and successful terminal output.
 
 ## Identity and cache scope
 
-Authentication returns `ProjectID` and HMAC `KeyID`. Raw caller keys stop at authentication.
-Key quotas use `KeyID`. RAG, cache, usage, and project concurrency use `ProjectID`.
-Concurrency caps are per process; Redis quotas are shared across instances.
-Quota approval precedes concurrency/body validation; later failures can still consume a slot.
+Raw caller keys stop at authentication. HMAC `KeyID` scopes quotas; `ProjectID` scopes RAG,
+cache, budgets, usage and project concurrency. Concurrency caps remain per process.
+Quota approval precedes body/concurrency validation; later failures may consume a slot.
 
-Cache queries filter before ranking:
+Cache filters SHA-256 tenant, primary routed model, schema `v2`, corpus revision, and `prompt-policy-v1`
+before vector ranking. Document replacement advances corpus revision. Policy/framing changes require
+bumping `promptPolicyVersion`. Old entries expire normally. One attempt retains its lookup embedding for storage.
+Fallback output uses the original routed namespace; ledger charges each model attempt separately.
 
-| Field | Value |
-|---|---|
-| `tenant` | SHA-256 of project ID |
-| `model` | Primary deterministic route's model ID |
-| `version` | Cache schema `v2`, optional corpus revision, `prompt-policy-v1` |
+## Trust boundaries
 
-Document replacement advances corpus revision. Policy/framing changes require a new
-`promptPolicyVersion` in `internal/completion/input.go`. Old entries expire normally.
-The attempt retains one embedding for lookup and store. Fallback responses use the
-original routed namespace; billed usage uses the model that produced the response.
+`ProviderInput.Messages()` creates the only system message. JSON-encoded reference identifiers and
+content occupy user data; the original question occupies a separate final user message.
+Forged delimiters cannot create API roles. JSON, SSE and fallback share the builder.
 
-## Prompt trust boundary
-
-`ProviderInput.Messages()` supplies the only system message. Reference identifiers and
-content occupy JSON-encoded user data; the original question occupies the final user message.
-Forged delimiters cannot create API message roles. JSON, SSE, and fallback calls share this builder.
-
-The model has no tools or gateway credentials. General security discussion remains allowed.
-No phrase blocklist, classifier, or output screening exists. Role separation is an application
-property; model resistance still needs adversarial evaluation.
+The model has no tools, credentials, or state access. General security discussion remains allowed.
+No phrase blocklist, classifier, or output screening exists. Streaming releases content immediately.
+Message separation is verified locally; model resistance and answer/cache poisoning remain unmeasured.
 
 ## Failures and settlement
 
 | Condition | Behavior |
 |---|---|
-| Missing/invalid key | 401 |
+| Missing, expired or revoked key | 401 |
 | Authentication/quota store error | 500; reject |
-| Key quota or project concurrency full | 429 |
-| Global concurrency full | 503 |
+| Key quota/project concurrency/daily budget full | 429 |
+| Global concurrency full or ledger unavailable for paid work | 503 |
 | Invalid body/prompt | 400 or 413 |
-| Retrieval failure | Log; continue ungrounded |
-| Cache failure | Log; continue as miss |
-| Transport error, HTTP 408/429/5xx | One distinct configured fallback before output |
-| Cancellation/deadline error | No fallback |
-| Provider error after fallback | Preserve status; transport errors become 502 |
-| Stream read failure/abandonment | Meter received work; never cache partial content |
+| Ordinary retrieval/cache error | Ungrounded completion/cache miss |
+| Transport error or HTTP 408/429/5xx | One distinct fallback before output; separate reservation |
+| Cancellation/deadline/budget error | No fallback |
+| Response overflow or malformed usage | Error; retain uncertain hold; no cache |
+| Provider error after fallback | Preserve status; transport error becomes 502 |
+| Stream failure after headers | SSE error; no successful terminal event or partial cache entry |
 
-Fallback defaults equal the primary, so default routes do not retry. Streams never replay after emitting content.
+Chat JSON/errors are capped at 1 MiB, embedding JSON at 128 KiB, cumulative SSE at 4 MiB,
+and each SSE line at 1 MiB. Oversized reads close upstream work.
 
-Without provider usage, input estimates include policy, references, and question. Output estimates use received content.
-Estimates use roughly four bytes per token, omit exact message-framing overhead, and carry an estimated flag.
-Cancellation-independent settlement has a 5s budget. Usage writes are best effort and use floating-point USD.
+Admission reserves serialized UTF-8 message bytes plus framing allowance and capped output.
+Provider usage releases known reservations. Missing counts produce labelled estimates while full
+holds remain pending. Detached settlement has a 5s limit; ledger failure stays visible.
+Unique operation IDs make retries idempotent; provider request IDs are retained when available.
+See [ledger rules](LEDGER.md) for daily windows, migration, and reconciliation.
 
 ## Startup and deployment
 
-`main.go` gives startup 10s and shutdown 30s. `application.New` checks Redis and creates
-cache/RAG indexes before serving on `:8080`. `/health` reports liveness only.
-Compose exposes Redis/RedisInsight without ACL/TLS and has no declared persistent volume.
-No durable production deployment is claimed.
+Startup has 10s; shutdown 30s. Both Redis processes must connect and have different server identities.
+Unmigrated legacy usage or key fingerprints stop startup. Cache/RAG indexes must initialize.
+`/health` reports liveness; `/ready` checks ledger connectivity and both Search indexes within 3s.
+Neither checks OpenAI credentials or model availability.
+
+Default Compose uses TLS, ACL users, private state networking, pinned images, separate persistent
+volumes, no eviction, and resource caps. A development override exposes loopback operator ports.
+Runtime users cannot administer keys or budget policy. [Operations](OPERATIONS.md)
+· [Backup and restore](LEDGER-RECOVERY.md).
 
 ## Diagram evidence
 
-The viewer and SVG reflect the applied working-tree code. Archify validates citations
-against a frozen local source snapshot, kept as a Git bundle beside `candidate.json`.
-The snapshot is separate from the project's branch. Source links remain local because
-that snapshot revision is not a published GitHub commit.
+Archify validates citations against a frozen local commit, stored in the source bundle beside the diagram.
+That snapshot is separate from the project branch; source links stay local-only.
+README embeds the static SVG. HTML retains source details, exploration, themes, and exports.
+[Diagram receipts](diagrams/README.md) describe artifact hashes and checks separately.
 
-The SVG is the viewer's canonical export. README embeds it; the HTML retains exploration,
-source details, themes, and export controls. Regenerate both from the same candidate after code changes.
-
-## Related docs
-
-- [RAG](RAG.md)
-- [Threat model](THREAT-MODEL.md)
-- [Roadmap](ROADMAP.md)
-- [Decisions](adr/README.md)
-- [Evaluation](EVALUATION.md)
+[Threat model](THREAT-MODEL.md) · [Roadmap](ROADMAP.md)
+· [RAG](RAG.md) · [Evaluation](EVALUATION.md).

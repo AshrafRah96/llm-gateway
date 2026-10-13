@@ -1,5 +1,12 @@
 package router
 
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/ashrafrah96/llm-gateway/internal/money"
+)
+
 // Model is the catalogue entry for an upstream model: what it is called, what it is
 // good for, and what it costs. This is the only place any of those three facts lives.
 type Model struct {
@@ -42,5 +49,33 @@ func All() []Model {
 
 // Cost is the USD price of a completion of this size on this model.
 func (m Model) Cost(tokensIn, tokensOut int) float64 {
-	return (float64(tokensIn)/1000)*m.PriceIn + (float64(tokensOut)/1000)*m.PriceOut
+	units, err := m.CostNanos(tokensIn, tokensOut)
+	if err != nil {
+		return 0
+	}
+	return money.USD(units)
+}
+
+// Rates returns exact nanodollars per token; float fields remain only for wire compatibility.
+func (m Model) Rates() (int64, int64, error) {
+	in, err := money.ParseUSD(strconv.FormatFloat(m.PriceIn, 'f', -1, 64))
+	if err != nil {
+		return 0, 0, err
+	}
+	out, err := money.ParseUSD(strconv.FormatFloat(m.PriceOut, 'f', -1, 64))
+	if err != nil {
+		return 0, 0, err
+	}
+	if in%1000 != 0 || out%1000 != 0 {
+		return 0, 0, fmt.Errorf("model rates must resolve to whole nanodollars per token")
+	}
+	return in / 1000, out / 1000, nil
+}
+
+func (m Model) CostNanos(tokensIn, tokensOut int) (int64, error) {
+	in, out, err := m.Rates()
+	if err != nil {
+		return 0, err
+	}
+	return money.Cost(int64(tokensIn), int64(tokensOut), in, out)
 }

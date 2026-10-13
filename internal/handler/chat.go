@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,9 @@ import (
 	"github.com/ashrafrah96/llm-gateway/internal/completion"
 	"github.com/ashrafrah96/llm-gateway/internal/middleware"
 	"github.com/ashrafrah96/llm-gateway/internal/ratelimit"
+	"github.com/ashrafrah96/llm-gateway/internal/usage"
+	"strconv"
+	"time"
 )
 
 type ChatRequest struct {
@@ -23,7 +27,10 @@ type Handler struct {
 	completion *completion.Completion
 	usage      StatsReader
 	limiter    *ratelimit.Limiter
+	ready      func(context.Context) error
 }
+
+func (h *Handler) Readiness(check func(context.Context) error) { h.ready = check }
 
 func New(c *completion.Completion, tracker StatsReader, limiter *ratelimit.Limiter) *Handler {
 	return &Handler{completion: c, usage: tracker, limiter: limiter}
@@ -38,7 +45,17 @@ func NewServer(h *Handler, mws ...middleware.Middleware) http.Handler {
 	mux.Handle("GET /limits", middleware.Chain(limitsHandler(h.limiter), mws...))
 
 	mux.HandleFunc("GET /health", health)
-	mux.HandleFunc("GET /models", models)
+	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if h.ready == nil || h.ready(ctx) != nil {
+			http.Error(w, "dependencies unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+	})
+	mux.HandleFunc("GET /models", modelsFor(h.completion.Models()))
 
 	return mux
 }
@@ -88,7 +105,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.completion.Complete(r.Context(), req)
 	if err != nil {
-		http.Error(w, "upstream error", http.StatusBadGateway)
+		writeCompletionError(w, err)
 		return
 	}
 
@@ -136,4 +153,20 @@ func withGatewayMetadata(resp completion.Response) []byte {
 		return resp.Body
 	}
 	return out
+}
+
+func writeCompletionError(w http.ResponseWriter, err error) {
+	var budget *usage.BudgetError
+	if errors.As(err, &budget) {
+		if budget.Exhausted {
+			now := time.Now().UTC()
+			seconds := int(now.Truncate(24*time.Hour).Add(24*time.Hour).Sub(now).Seconds()) + 1
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			http.Error(w, "project budget exhausted", http.StatusTooManyRequests)
+		} else {
+			http.Error(w, "project ledger unavailable", http.StatusServiceUnavailable)
+		}
+		return
+	}
+	http.Error(w, "upstream error", http.StatusBadGateway)
 }

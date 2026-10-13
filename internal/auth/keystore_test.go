@@ -116,3 +116,71 @@ func TestKeyStore_StoresOnlyFingerprintAndReturnsProjectPrincipal(t *testing.T) 
 		t.Fatalf("principal = %+v", principal)
 	}
 }
+
+func TestKeyLifecyclePreservesIdentity(t *testing.T) {
+	client, err := dial()
+	if err != nil {
+		t.Skip(err)
+	}
+	ctx := context.Background()
+	s := NewKeyStore(client, "lifecycle-pepper")
+	project := "lifecycle-project"
+	keys := []string{"legacy-lifecycle", "new-lifecycle", "replacement-lifecycle", "revoked-lifecycle"}
+	for _, key := range keys {
+		client.Del(ctx, projectKeyPrefix+s.Fingerprint(key))
+	}
+	t.Cleanup(func() {
+		for _, key := range keys {
+			client.Del(ctx, projectKeyPrefix+s.Fingerprint(key))
+		}
+	})
+	client.HSet(ctx, projectKeyPrefix+s.Fingerprint(keys[0]), "project", project, "revoked", "0")
+	if _, ok, err := s.Lookup(ctx, keys[0]); err != nil || !ok {
+		t.Fatalf("legacy invalid: %v %v", ok, err)
+	}
+	if err := s.Provision(ctx, project, keys[1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Provision(ctx, "other-project", keys[1]); err == nil {
+		t.Fatal("reassigned key")
+	}
+	now, err := client.Time(ctx).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiry := client.HGet(ctx, projectKeyPrefix+s.Fingerprint(keys[1]), "expires_at").Val()
+	if expiry == "" {
+		t.Fatal("new key lacks expiry")
+	}
+	if err := s.Rotate(ctx, project, keys[0], keys[2], time.Hour, 90*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys[:3] {
+		p, ok, err := s.Lookup(ctx, key)
+		if err != nil || !ok || p.ProjectID != project {
+			t.Fatalf("overlap %s: %+v %v %v", key, p, ok, err)
+		}
+	}
+	client.HSet(ctx, projectKeyPrefix+s.Fingerprint(keys[0]), "expires_at", now.Unix())
+	if _, ok, err := s.Lookup(ctx, keys[0]); err != nil || ok {
+		t.Fatalf("expired valid: %v %v", ok, err)
+	}
+	if err := s.Provision(ctx, project, keys[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.Lookup(ctx, keys[0]); ok {
+		t.Fatal("expired key revived by provisioning")
+	}
+	if err := s.Provision(ctx, project, keys[3]); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Revoke(ctx, project, keys[3]); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Provision(ctx, project, keys[3]); err == nil {
+		t.Fatal("revoked key reprovisioned")
+	}
+	if _, ok, _ := s.Lookup(ctx, keys[3]); ok {
+		t.Fatal("revoked key valid")
+	}
+}

@@ -1,36 +1,35 @@
 # Architecture assets
 
-`architecture.svg` is the canonical Archify **SVG · Auto** export. README and architecture docs embed it.
-It has no scripts or external images and adapts to host color preference.
+README embeds `architecture.svg`. The refreshed HTML and static SVG show the same 12 nodes and 13 relationships.
+The SVG is a static companion extracted from finalized HTML geometry, using the existing Archify standalone
+theme/font stylesheet. It contains no scripts or external images. This refresh did not use the viewer-menu exporter.
+The browser connector's local-file restriction was not bypassed. Hosted GitHub rendering remains unchecked.
 
-[Interactive HTML](architecture.html)
-· [Candidate](architecture.json)
-· [Validation receipt](architecture.finalize-summary.json)
-· [Export receipt](export-receipt.json)
-· [Frozen source bundle](source.bundle)
-· [Source checksums](source-manifest.json)
+[Interactive HTML](architecture.html) · [Candidate](architecture.json)
+· [Validation receipt](architecture.finalize-summary.json) · [SVG receipt](export-receipt.json)
+· [Frozen source bundle](source.bundle) · [Source checksums](source-manifest.json)
+· [Visual review](visual-review.json).
 
-## Recheck this snapshot
+## Recheck
 
 From repository root, with Archify installed:
 
 ```bash
 export ARCHIFY=/path/to/archify/bin/archify.mjs
 git clone docs/diagrams/source.bundle /tmp/llm-gateway-diagram-source
+git -C /tmp/llm-gateway-diagram-source remote set-url origin https://github.com/AshrafRah96/llm-gateway.git
 node "$ARCHIFY" finalize architecture \
-  docs/diagrams/architecture.json \
-  docs/diagrams/architecture.html \
+  docs/diagrams/architecture.json docs/diagrams/architecture.html \
   --repo-root /tmp/llm-gateway-diagram-source \
-  --out-dir /tmp/llm-gateway-diagram-recheck \
-  --quality showcase --json
+  --out-dir /tmp/llm-gateway-diagram-recheck --quality showcase --json
 ```
 
-Use new temporary paths if those directories exist. This verifies the frozen source,
-not later working-tree edits. Snapshot identity is local; it is not a published GitHub revision.
+Choose fresh temporary paths. This verifies the frozen local snapshot, not subsequent edits or a published GitHub revision.
 
-## Update after code changes
+## Update
 
-Freeze the new source, update candidate facts/citations and revision, then run Archify `finalize`.
-Open the passing HTML. Choose **Export**, then **SVG · Auto**; save to `docs/diagrams/architecture.svg`.
-Update README/viewer links and the export receipt together. Keep prior dated diagrams locally under ignored `.archify/`. Publish current viewer/source/evidence under `docs/diagrams/`.
-The source snapshot must include new untracked source files as well as tracked edits.
+Freeze current source, including untracked files. Update candidate facts, citations and revision.
+Run `finalize`; inspect supported `visual-check` captures when visual review is needed.
+Keep previous dated deliveries under ignored `.archify/` and current assets/receipts here.
+The viewer offers **Export → SVG · Auto** when browser access permits it. If a static companion is
+built outside that exporter, record its derivation honestly and inspect it separately.

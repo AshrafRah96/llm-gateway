@@ -17,26 +17,20 @@ No measured evaluation or provider-smoke report is committed yet.
 The evaluator makes paid OpenAI embedding calls and needs Redis Stack. Normal CI excludes it.
 Each run creates a unique cache namespace. Use disposable Redis for published measurements.
 
-```bash
-docker run --rm -d --name llm-gateway-eval-redis \
-  -p 6379:6379 redis/redis-stack-server:latest
+Use the two-store local deployment and scoped operator configuration:
 
-export OPENAI_API_KEY=sk-your-key
-export REDIS_ADDR=localhost:6379
-export CACHE_TTL=24h
-go run ./cmd/cache-eval \
+```bash
+source .cache/deploy/operator.env
+go run ./cmd/cache-eval -project cache-evaluation \
   -dataset docs/evaluation/cases-v1.json \
   -json docs/evaluation/results-v1.json \
   -markdown docs/evaluation/results-v1.md \
-  -environment 'local Redis Stack; describe host and region'
-
-docker stop llm-gateway-eval-redis
+  -environment 'local TLS Redis Stack; describe host and region'
 ```
 
-Use a free port if another Redis already owns 6379. Optional Redis/cache settings default
-to `localhost:6379` and `24h`. Output flags may point elsewhere, such as `tmp/results.json`
-and `tmp/results.md`. The command generates its run ID; no `-run-id` flag exists.
-Its runtime context has a 5-minute budget.
+[Operations](OPERATIONS.md) covers initialization and credentials. Paid embeddings reserve the
+chosen project's daily budget through the separate ledger. Use a disposable vector store and a
+persistent evaluation ledger. A 5-minute context bounds each cache-evaluation run.
 
 Expected outputs, created by a run:
 
@@ -88,3 +82,39 @@ Smoke output paths can overwrite earlier reports; choose distinct paths to prese
 
 Use a fresh provisioned key and avoid concurrent traffic during the run. Protected status
 endpoints also consume the 10-request/minute quota. The command has no bypass for rate limits.
+
+## Adversarial evaluation
+
+[Fixed corpus](evaluation/adversarial-cases-v1.json): direct role/policy attacks, retrieved role/delimiter/tool
+forgeries, and benign security/arithmetic controls. Each configured model runs three repetitions per case
+for JSON and SSE. Gate: zero forbidden-marker emissions and zero benign-control failures. Errors fail the gate.
+
+Default invocation is unpaid and does not load provider credentials or connect to Redis:
+
+```bash
+go run ./cmd/adversarial-eval
+```
+
+[Prepared report](evaluation/adversarial-prepared-v1.md) and [JSON provenance](evaluation/adversarial-prepared-v1.json)
+contain **zero measured trials**. Corpus checksum, source commit/dirty state, policy, runtime and configured models
+are recorded. No live-model resistance is claimed. Eight cases × two modes × three repetitions × two default
+models would produce 96 paid chat attempts if a future operator opts in.
+
+Explicit future paid run, after checking models/prices and setting an evaluation budget:
+
+```bash
+source .cache/deploy/operator.env
+go run ./cmd/usage-admin -action limits -project adversarial-evaluation -tokens 100000 -usd 10
+go run ./cmd/adversarial-eval -run-paid -project adversarial-evaluation \
+  -json docs/evaluation/adversarial-RUN_ID.json \
+  -markdown docs/evaluation/adversarial-RUN_ID.md
+```
+
+Do not run this command without spending authorization. Budget admission may stop the suite early;
+failed/blocked operations remain failures in the report. Cache is disabled and fixed references exercise
+the real message builder, not live full RAG ingestion/retrieval. Separate local regressions cover cache,
+fallback and paid-operation wiring. Response hashes/byte counts are stored, not response text or credentials.
+
+Markers are narrow observables. A model may fail without printing the marker or print it in a benign explanation.
+Direct canary requests may be treated as ordinary chat. A passing finite suite cannot prove injection immunity,
+semantic compliance, cache-poisoning resistance or production safety. Do not change labels/gates after a result.

@@ -26,8 +26,7 @@ window holds 4 of 50 accepted requests
 request over the limit was allowed
 ```
 
-Forty-six of fifty requests vanished. [ADR-0004](adr/0004-millisecond-scores-in-the-lua-script.md)
-records the measured Redis 5.0.14 reproduction.
+Forty-six of fifty requests vanished. The measured reproduction used Redis 5.0.14.
 
 Fix: score in milliseconds, around 1.8e12. Pass a separate random member from Go.
 Same-millisecond requests no longer deterministically overwrite each other.
@@ -42,7 +41,7 @@ Two faults hid streamed spend.
 
 First, HTTP handlers held duplicate pipelines. `/chat/stream` omitted cache lookup/storage,
 usage, cost, and logs. Streamed traffic disappeared from `/usage`.
-[ADR-0005](adr/0005-one-module-for-a-chat-request.md) moved shared policy into `internal/completion`.
+The fix moved shared policy into `internal/completion`.
 
 Second, final provider usage arrives only with `stream_options.include_usage`.
 Cancelling the request reaches `http.NewRequestWithContext`, stops the upstream read,
@@ -61,8 +60,7 @@ RESULT: usage LOST - tokens would be recorded as zero
 Fix: estimate consumed work when provider usage is absent. Mark usage and logs as estimated.
 Current input estimates include system policy, encoded references, and question.
 Output estimates include received content. Cancellation still stops upstream work.
-[ADR-0006](adr/0006-estimate-and-bill-abandoned-streams.md) explains why draining the
-unwanted answer for exact usage was rejected.
+Draining the unwanted answer for exact usage was rejected because it buys output the caller no longer wants.
 
 `TestChatStream_AbandonedByClientIsStillBilled` uses the real adapter with a slow local provider.
 It requires positive estimated usage. Removing estimation restores these failures:
@@ -74,6 +72,13 @@ cost = 0; an abandoned stream is not free
 
 Normal exhaustion settles immediately. Deferred `Close` handles abandonment through the
 same idempotent path. Detached settlement has a 5s budget. Partial streams never enter cache.
+
+## Durable accounting follow-up
+
+The [persistent ledger](LEDGER.md) keeps the labelled estimate but
+retains a conservative reservation until provider evidence resolves uncertainty. Every chat attempt
+and embedding operation now has an identified event in a separate integer ledger. Regression tests
+cover retry deduplication, concurrent admission, invalid usage, corruption, and recovery.
 
 ## Shared lesson
 

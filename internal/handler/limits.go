@@ -22,7 +22,7 @@ func limitsHandler(limiter *ratelimit.Limiter) http.HandlerFunc {
 			return
 		}
 		if principal, ok := middleware.PrincipalFromContext(r.Context()); ok {
-			apiKey = principal.KeyID
+			apiKey = "quota:" + principal.KeyID
 		}
 
 		count, limit, window, err := limiter.Status(r.Context(), apiKey)

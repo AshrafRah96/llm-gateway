@@ -1,0 +1,67 @@
+{
+  "scope": "local unpaid repository verification; no production certification",
+  "generated_at": "2026-10-13T21:21:48.905301+00:00",
+  "source_commit": "378c5b3f0bde7b04085d5d9b4a537803194cbab8",
+  "source_dirty": true,
+  "runtime": "go version go1.27.2 darwin/arm64",
+  "race_suite": {
+    "status": "passed",
+    "tests_and_subtests": 240,
+    "tested_packages": 19,
+    "failed": 0,
+    "skipped_tests": 0,
+    "packages_without_test_files": 6,
+    "output_sha256": "695f395e60c6fdc852a67ca9cb19a5ef7ec539373886e20a4f63e1b1fbd71fa7"
+  },
+  "build": "passed",
+  "vet": "passed",
+  "formatting": "passed",
+  "diff_check": "passed",
+  "pinned_container_build": "passed; local context excludes credentials/caches",
+  "compose_config": "passed",
+  "authenticated_tls_acl_readiness": "passed using fresh generated local credentials, no provider call",
+  "restore": {
+    "status": "passed",
+    "snapshot_sha256": "49e67164b2159039bf1c903c0fe6d587f268345e0cce5fde94c7d6b9d28c3d30",
+    "records_fingerprint_sha1": "dd5843286e00df0309ba386bb8e14b0ea74a26c5",
+    "auth_records": 1,
+    "usage_events": 2,
+    "pending_reservations": 1,
+    "project_totals": 1,
+    "utc_day_records": 1,
+    "aof_canary_persisted": true,
+    "source_snapshot_unchanged": true,
+    "isolated_resources_cleaned": true
+  },
+  "diagram": {
+    "automated_status": "passed",
+    "receipts": "../diagrams/architecture.finalize-summary.json",
+    "visual_review": "../diagrams/visual-review.json"
+  },
+  "graph": "Local analysis output; excluded from GitHub publication.",
+  "paid_provider_calls": 0,
+  "live_smoke": "unmeasured",
+  "cache_quality": "unmeasured",
+  "real_model_adversarial": "unmeasured",
+  "invoice_agreement": "unmeasured",
+  "remote_ci": "not run; local checks only",
+  "gateway_container": "passed /ready and /health with fake key; nonroot read-only filesystem and ALL capabilities dropped; no provider calls",
+  "graph_diagnostics": {
+    "nodes": 996,
+    "edges": 3338,
+    "communities": 54,
+    "raw_dangling_endpoint_edges": 455,
+    "undirected_collapsed_edges": 40,
+    "missing_endpoints": 0,
+    "self_loops": 0,
+    "postbuild_endpoints_valid": true,
+    "extraction_token_usage": "unavailable"
+  },
+  "documentation_cleanup": {
+    "status": "passed",
+    "directory_removed": true,
+    "local_links_verified": true,
+    "runtime_source_unchanged": true,
+    "diagram_snapshot_revision": "e210ec913fa28512df6d621257d526eacdc8976f"
+  }
+}

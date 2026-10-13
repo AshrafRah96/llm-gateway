@@ -22,6 +22,7 @@ func TestLoadConfig(t *testing.T) {
 			want: Config{
 				OpenAIAPIKey:            "sk-test",
 				RedisAddr:               "localhost:6379",
+				LedgerAddr:              "localhost:6380",
 				CacheTTL:                24 * time.Hour,
 				RequestTimeout:          60 * time.Second,
 				MaxRequestBodyBytes:     64 << 10,
@@ -40,6 +41,7 @@ func TestLoadConfig(t *testing.T) {
 			want: Config{
 				OpenAIAPIKey:            "sk-test",
 				RedisAddr:               "redis:6380",
+				LedgerAddr:              "localhost:6380",
 				CacheTTL:                90 * time.Minute,
 				RequestTimeout:          60 * time.Second,
 				MaxRequestBodyBytes:     64 << 10,
@@ -88,6 +90,7 @@ func TestNewRejectsInvalidConfigurationBeforeDialingRedis(t *testing.T) {
 	valid := Config{
 		OpenAIAPIKey:            "sk-test",
 		RedisAddr:               "127.0.0.1:0",
+		LedgerAddr:              "127.0.0.1:1",
 		CacheTTL:                time.Hour,
 		APIKeyPepper:            "test-pepper",
 		RequestTimeout:          time.Second,
@@ -128,5 +131,28 @@ func TestNewRejectsInvalidConfigurationBeforeDialingRedis(t *testing.T) {
 				t.Fatalf("New error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestConfiguredModelsRequireCorrectPricesAndCaps(t *testing.T) {
+	for _, env := range []map[string]string{
+		{"CHEAP_MODEL": "unknown"},
+		{"CHEAP_MODEL": "unknown", "CHEAP_PRICE_IN": "0.001", "CHEAP_PRICE_OUT": "0.002"},
+		{"CHEAP_PRICE_IN": "+1", "CHEAP_PRICE_OUT": "1"},
+		{"CHEAP_MAX_OUTPUT_TOKENS": "0"},
+		{"CHEAP_FALLBACK_PRICE_IN": "1", "CHEAP_FALLBACK_PRICE_OUT": "2"},
+	} {
+		env["OPENAI_API_KEY"] = "fixture"
+		if _, err := LoadConfig(func(k string) string { return env[k] }); err == nil {
+			t.Fatalf("accepted invalid catalogue: %+v", env)
+		}
+	}
+	env := map[string]string{"OPENAI_API_KEY": "fixture", "CHEAP_MODEL": "custom", "CHEAP_PRICE_IN": "0.001", "CHEAP_PRICE_OUT": "0.002", "CHEAP_MAX_OUTPUT_TOKENS": "100"}
+	cfg, err := LoadConfig(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Router.Cheap.ID != "custom" || cfg.Router.Models()[0].PriceIn != 0.001 || cfg.Router.Models()[0].MaxOutputTokens != 100 {
+		t.Fatalf("catalogue mismatch: %+v", cfg.Router.Models())
 	}
 }

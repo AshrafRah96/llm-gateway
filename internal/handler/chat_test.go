@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ashrafrah96/llm-gateway/internal/auth"
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
 	"github.com/ashrafrah96/llm-gateway/internal/completion"
+	"github.com/ashrafrah96/llm-gateway/internal/middleware"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
 	"github.com/ashrafrah96/llm-gateway/internal/usage"
 )
@@ -19,10 +21,11 @@ import (
 // exercise everything except the network.
 
 type fakeProvider struct {
-	body   []byte
-	events []completion.ProviderEvent
-	status int
-	err    error
+	body           []byte
+	events         []completion.ProviderEvent
+	status         int
+	err            error
+	streamStatuses []int
 }
 
 func (p *fakeProvider) Complete(ctx context.Context, input completion.ProviderInput, m router.Model) ([]byte, int, error) {
@@ -36,7 +39,12 @@ func (p *fakeProvider) Stream(ctx context.Context, input completion.ProviderInpu
 	if p.err != nil {
 		return nil, 0, p.err
 	}
-	return &fakeProviderStream{events: append([]completion.ProviderEvent(nil), p.events...)}, p.status, nil
+	status := p.status
+	if len(p.streamStatuses) > 0 {
+		status = p.streamStatuses[0]
+		p.streamStatuses = p.streamStatuses[1:]
+	}
+	return &fakeProviderStream{events: append([]completion.ProviderEvent(nil), p.events...)}, status, nil
 }
 
 type fakeProviderStream struct {
@@ -196,6 +204,54 @@ func TestChatStream_InvalidBody(t *testing.T) {
 	w := post(t, newTestServer(&fakeProvider{}, nil), "/chat/stream", "not json")
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+type groundedRetriever struct{}
+
+func (groundedRetriever) Retrieve(context.Context, string, string) (completion.Retrieval, error) {
+	return completion.Retrieval{
+		CorpusVersion: "v1",
+		References:    []completion.Reference{{DocumentID: "doc", ChunkID: "chunk", Content: "Paris"}},
+		Sources:       []completion.Source{{DocumentID: "doc", ChunkID: "chunk", Excerpt: "Paris"}},
+	}, nil
+}
+
+type projectKeys struct{}
+
+func (projectKeys) Valid(context.Context, string) (bool, error) { return true, nil }
+
+func (projectKeys) Lookup(context.Context, string) (auth.Principal, bool, error) {
+	return auth.Principal{ProjectID: "test-project"}, true, nil
+}
+
+func TestChatStream_GroundedFallbackHeaders(t *testing.T) {
+	p := &fakeProvider{
+		streamStatuses: []int{http.StatusServiceUnavailable, http.StatusOK},
+		events:         []completion.ProviderEvent{{Content: "Paris"}, {Done: true}},
+	}
+	r := router.Default()
+	r.CheapFallback = router.Powerful
+	c := completion.NewWithRouting(p, &fakeCache{}, fakeRecorder{}, r, groundedRetriever{})
+	srv := NewServer(New(c, nil, nil), middleware.Auth(projectKeys{}))
+	w := post(t, srv, "/chat/stream", `{"prompt":"France's capital?"}`)
+	response := w.Result()
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	for name, want := range map[string]string{
+		"X-Model-Fallback": "true",
+		"X-Model":          router.Powerful.ID,
+		"X-RAG-Grounded":   "true",
+	} {
+		if got := response.Header.Get(name); got != want {
+			t.Errorf("committed %s = %q, want %q", name, got, want)
+		}
+	}
+	body := w.Body.String()
+	if !strings.HasPrefix(body, "event: sources\n") || !strings.Contains(body, `"chunk_id":"chunk"`) || !strings.Contains(body, `"content":"Paris"`) || !strings.HasSuffix(body, "data: [DONE]\n\n") {
+		t.Errorf("grounded fallback stream incomplete: %s", body)
 	}
 }
 

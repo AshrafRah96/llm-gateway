@@ -43,7 +43,7 @@ func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "upstream error", upstream.Status)
 			return
 		}
-		http.Error(w, "upstream error", http.StatusBadGateway)
+		writeCompletionError(w, err)
 		return
 	}
 	// Exhaustion settles normal streams; Close is the fallback when the client leaves.
@@ -58,6 +58,9 @@ func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Cache", "MISS")
 		w.Header().Set("X-Model", stream.Model())
 	}
+	if stream.Fallback() {
+		w.Header().Set("X-Model-Fallback", "true")
+	}
 	if stream.RAGEnabled() && stream.Grounded() {
 		w.Header().Set("X-RAG-Grounded", "true")
 		data, err := json.Marshal(gatewayMetadata{Grounded: true, Sources: stream.Sources()})
@@ -69,10 +72,6 @@ func (h *Handler) chatStream(w http.ResponseWriter, r *http.Request) {
 	} else if stream.RAGEnabled() {
 		w.Header().Set("X-RAG-Grounded", "false")
 	}
-	if stream.Fallback() {
-		w.Header().Set("X-Model-Fallback", "true")
-	}
-
 	for chunk, ok := stream.Next(); ok; chunk, ok = stream.Next() {
 		data := []byte("[DONE]")
 		if !chunk.Done {

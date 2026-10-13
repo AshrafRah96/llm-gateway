@@ -31,3 +31,13 @@ README.md
 
 # Test files
 *_test.go
+
+# Local secrets, backups, generated evidence and tool caches
+.cache/
+.archify/
+.agents/
+.codex/
+deployment/
+docs/
+graphify-out/
+scripts/

@@ -1,10 +1,16 @@
 {
   "diagram_type": "architecture",
-  "source_artifact_sha256": "ddd8b791d553ab2e437b5db4f8160523ef0d905bb9ac2d75de6c4c129a4e2409",
-  "specification_sha256": "a850c2a90a0e1f97a65a14042c565f09594500a527191c6eb79e7c9121270219",
+  "source_artifact_sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+  "specification_sha256": "5d958c455d8df47639791ddd716188fc980b44304db78908f9b7d1d1c01cc8e9",
   "export": "docs/diagrams/architecture.svg",
-  "export_sha256": "b87d293498678ce41fc4811776d048c8052724826a0ea021c47e4746a3752249",
-  "export_bytes": 164997,
-  "method": "Archify SVG Auto export; trailing whitespace normalized",
-  "derivation": "Same diagram topology and geometry as the inspected original export; current HTML uses tracked publication paths."
+  "export_sha256": "a901de1929e2d92e5875c34e02d294c0a5636bdfd3c3d3f7367fbb146ad9d05c",
+  "export_bytes": 168282,
+  "method": "Static companion: extract authored SVG geometry from finalized HTML; apply existing Archify standalone theme/font stylesheet; remove interactive attributes. Trailing whitespace normalized.",
+  "limitations": [
+    "This is not a new viewer-menu SVG export. Browser connector local-file restriction was not bypassed.",
+    "Hosted GitHub rendering remains unchecked."
+  ],
+  "nodes": 12,
+  "connections": 13,
+  "derivation": "Source metadata and one evidence citation changed; static SVG topology, labels and geometry are unchanged."
 }

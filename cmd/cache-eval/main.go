@@ -14,6 +14,8 @@ import (
 	"github.com/ashrafrah96/llm-gateway/internal/cache"
 	"github.com/ashrafrah96/llm-gateway/internal/evaluation"
 	"github.com/ashrafrah96/llm-gateway/internal/evidence"
+	"github.com/ashrafrah96/llm-gateway/internal/redisconfig"
+	"github.com/ashrafrah96/llm-gateway/internal/usage"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -34,12 +36,16 @@ func main() {
 }
 
 func run() error {
+	project := flag.String("project", "cache-evaluation", "project charged for evaluation embeddings")
 	datasetPath := flag.String("dataset", "docs/evaluation/cases-v1.json", "evaluation corpus")
 	jsonPath := flag.String("json", "docs/evaluation/results-v1.json", "new JSON output")
 	markdownPath := flag.String("markdown", "docs/evaluation/results-v1.md", "new Markdown output")
 	environment := flag.String("environment", "unspecified", "machine, region and Redis deployment description (no secrets)")
 	flag.Parse()
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey, err := redisconfig.Secret(os.Getenv, "OPENAI_API_KEY")
+	if err != nil {
+		return err
+	}
 	if apiKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is required")
 	}
@@ -64,13 +70,24 @@ func run() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	client := redis.NewClient(&redis.Options{Addr: redisAddr, Protocol: 2})
+	options, err := redisconfig.Options(os.Getenv, "REDIS_", redisAddr)
+	if err != nil {
+		return err
+	}
+	ledgerOptions, err := redisconfig.Options(os.Getenv, "LEDGER_REDIS_", "localhost:6380")
+	if err != nil {
+		return err
+	}
+	client := redis.NewClient(options)
+	ledgerClient := redis.NewClient(ledgerOptions)
+	defer ledgerClient.Close()
+	ctx = usage.WithProject(ctx, *project)
 	defer client.Close()
 	provenance, err := evidence.Capture(ctx, client)
 	if err != nil {
 		return err
 	}
-	semanticCache, err := cache.NewSemanticCache(ctx, client, cache.NewEmbeddingClient(apiKey), ttl)
+	semanticCache, err := cache.NewSemanticCache(ctx, client, cache.NewMeteredEmbeddingClient(apiKey, usage.NewTracker(ledgerClient), "cache_evaluation"), ttl)
 	if err != nil {
 		return fmt.Errorf("create semantic cache: %w", err)
 	}

@@ -38,8 +38,8 @@ func tracker(t *testing.T) (*Tracker, string) {
 	}
 
 	apiKey := "usage-test:" + t.Name()
-	client.Del(context.Background(), "usage:"+apiKey)
-	t.Cleanup(func() { client.Del(context.Background(), "usage:"+apiKey) })
+	cleanProject(client, apiKey)
+	t.Cleanup(func() { cleanProject(client, apiKey) })
 
 	return NewTracker(client), apiKey
 }
@@ -48,8 +48,8 @@ func TestTracker_RecordAccumulates(t *testing.T) {
 	tr, key := tracker(t)
 	ctx := context.Background()
 
-	for range 3 {
-		err := tr.Record(ctx, Entry{APIKey: key, TokensIn: 10, TokensOut: 20, CostUSD: 0.5})
+	for i := range 3 {
+		err := tr.Record(ctx, Entry{APIKey: key, EventID: fmt.Sprintf("e-%d", i), TokensIn: 10, TokensOut: 20, CostUSD: 0.5})
 		if err != nil {
 			t.Fatalf("record: %v", err)
 		}
@@ -60,7 +60,7 @@ func TestTracker_RecordAccumulates(t *testing.T) {
 		t.Fatalf("get: %v", err)
 	}
 
-	want := Stats{Requests: 3, TokensIn: 30, TokensOut: 60, CostUSD: 1.5}
+	want := Stats{Requests: 3, TokensIn: 30, TokensOut: 60, CostUSD: 1.5, TotalTokens: 90, TotalCostUSD: 1.5}
 	if *got != want {
 		t.Errorf("got %+v, want %+v", *got, want)
 	}
@@ -72,11 +72,11 @@ func TestTracker_EstimatedRequestsAreCountedSeparately(t *testing.T) {
 	tr, key := tracker(t)
 	ctx := context.Background()
 
-	if err := tr.Record(ctx, Entry{APIKey: key, TokensIn: 100, TokensOut: 200, CostUSD: 1}); err != nil {
+	if err := tr.Record(ctx, Entry{APIKey: key, EventID: "measured", TokensIn: 100, TokensOut: 200, CostUSD: 1}); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	if err := tr.Record(ctx, Entry{
-		APIKey: key, TokensIn: 50, TokensOut: 25, CostUSD: 0.25, Estimated: true,
+		APIKey: key, EventID: "estimated", TokensIn: 50, TokensOut: 25, CostUSD: 0.25, Estimated: true,
 	}); err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -92,6 +92,7 @@ func TestTracker_EstimatedRequestsAreCountedSeparately(t *testing.T) {
 		TokensOut:         225,
 		CostUSD:           1.25,
 		EstimatedRequests: 1,
+		TotalTokens:       375, TotalCostUSD: 1.25,
 	}
 	if *got != want {
 		t.Errorf("got %+v, want %+v", *got, want)
@@ -107,5 +108,12 @@ func TestTracker_GetUnknownKey(t *testing.T) {
 	}
 	if *got != (Stats{}) {
 		t.Errorf("got %+v, want zero stats", *got)
+	}
+}
+
+func cleanProject(client *redis.Client, project string) {
+	iter := client.Scan(context.Background(), 0, prefix(project)+"*", 100).Iterator()
+	for iter.Next(context.Background()) {
+		client.Del(context.Background(), iter.Val())
 	}
 }

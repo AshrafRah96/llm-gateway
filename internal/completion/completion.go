@@ -4,6 +4,7 @@ package completion
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
@@ -99,6 +100,7 @@ type Completion struct {
 	usage     Recorder
 	router    router.Router
 	retriever Retriever
+	ledger    *usage.Tracker
 }
 
 // lifecycle concentrates the policy shared by buffered and streaming delivery.
@@ -126,7 +128,18 @@ func NewWithRouting(provider Provider, cache Cache, usage Recorder, r router.Rou
 	return &Completion{provider: provider, cache: cache, usage: usage, router: r, retriever: retriever}
 }
 
-func (c *Completion) begin(ctx context.Context, req Request) *lifecycle {
+func NewWithLedger(provider Provider, cache Cache, ledger *usage.Tracker, r router.Router, retriever Retriever) *Completion {
+	c := NewWithRouting(&meteredProvider{provider: provider, ledger: ledger}, cache, ledger, r, retriever)
+	c.ledger = ledger
+	return c
+}
+
+func (c *Completion) begin(ctx context.Context, req Request) (*lifecycle, error) {
+	project := req.ProjectID
+	if project == "" {
+		project = req.APIKey
+	}
+	ctx = usage.WithProject(ctx, project)
 	decision := c.router.Route(req.Prompt)
 	l := &lifecycle{
 		completion: c,
@@ -141,6 +154,10 @@ func (c *Completion) begin(ctx context.Context, req Request) *lifecycle {
 		l.ragEnabled = true
 		retrieval, err := c.retriever.Retrieve(ctx, req.ProjectID, req.Prompt)
 		if err != nil {
+			var budget *usage.BudgetError
+			if errors.As(err, &budget) {
+				return nil, err
+			}
 			log.Printf("retrieval error: %v", err)
 		} else {
 			l.cacheVersion = retrieval.CorpusVersion
@@ -150,19 +167,19 @@ func (c *Completion) begin(ctx context.Context, req Request) *lifecycle {
 		}
 	}
 
-	project := req.ProjectID
-	if project == "" {
-		project = req.APIKey
-	}
 	namespace := cache.NewProjectNamespace(project, l.model.ID, l.cacheVersion)
 	namespace.Version += ":" + promptPolicyVersion
 	attempt, err := c.cache.Begin(ctx, namespace, req.Prompt)
 	if err != nil {
+		var budget *usage.BudgetError
+		if errors.As(err, &budget) {
+			return nil, err
+		}
 		log.Printf("cache error: %v", err)
-		return l
+		return l, nil
 	}
 	l.attempt = attempt
-	return l
+	return l, nil
 }
 
 func (l *lifecycle) lookup(ctx context.Context) *cache.CacheEntry {
@@ -187,6 +204,10 @@ func (l *lifecycle) store(ctx context.Context, body []byte, status int) {
 }
 
 func (l *lifecycle) meter(ctx context.Context, entry usage.Entry) {
+	if l.completion.ledger != nil {
+		return
+	}
+	entry.EventID = rand.Text()
 	if err := l.completion.usage.Record(ctx, entry); err != nil {
 		log.Printf("usage record error: %v", err)
 	}
@@ -200,7 +221,10 @@ func (l *lifecycle) log(entry observability.RequestLog) {
 }
 
 func (c *Completion) Complete(ctx context.Context, req Request) (Response, error) {
-	l := c.begin(ctx, req)
+	l, err := c.begin(ctx, req)
+	if err != nil {
+		return Response{}, err
+	}
 
 	if entry := l.lookup(ctx); entry != nil {
 		l.log(observability.RequestLog{
@@ -210,10 +234,10 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 		return Response{Body: entry.Response, Status: entry.Status, CacheHit: true, Grounded: l.grounded, Sources: l.sources, RAGEnabled: l.ragEnabled}, nil
 	}
 
-	body, status, err := c.provider.Complete(ctx, l.input, l.model)
+	body, status, err := c.provider.Complete(l.ctx, l.input, l.model)
 	if shouldFailover(err, status) && l.fallback.ID != "" && l.fallback.ID != l.model.ID {
 		l.failover = true
-		body, status, err = c.provider.Complete(ctx, l.input, l.fallback)
+		body, status, err = c.provider.Complete(l.ctx, l.input, l.fallback)
 		if err == nil {
 			l.model = l.fallback
 		}
@@ -246,6 +270,10 @@ func (c *Completion) Complete(ctx context.Context, req Request) (Response, error
 }
 
 func shouldFailover(err error, status int) bool {
+	var budget *usage.BudgetError
+	if errors.As(err, &budget) {
+		return false
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return false
@@ -261,3 +289,5 @@ func (l *lifecycle) identity() string {
 	}
 	return l.req.APIKey
 }
+
+func (c *Completion) Models() []router.Model { return c.router.Models() }

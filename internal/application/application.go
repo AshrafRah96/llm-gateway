@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ashrafrah96/llm-gateway/internal/auth"
@@ -12,9 +13,11 @@ import (
 	"github.com/ashrafrah96/llm-gateway/internal/completion"
 	"github.com/ashrafrah96/llm-gateway/internal/handler"
 	"github.com/ashrafrah96/llm-gateway/internal/middleware"
+	"github.com/ashrafrah96/llm-gateway/internal/money"
 	"github.com/ashrafrah96/llm-gateway/internal/provider"
 	"github.com/ashrafrah96/llm-gateway/internal/rag"
 	"github.com/ashrafrah96/llm-gateway/internal/ratelimit"
+	"github.com/ashrafrah96/llm-gateway/internal/redisconfig"
 	"github.com/ashrafrah96/llm-gateway/internal/router"
 	"github.com/ashrafrah96/llm-gateway/internal/usage"
 	"github.com/redis/go-redis/v9"
@@ -28,6 +31,9 @@ const (
 type Config struct {
 	OpenAIAPIKey            string
 	RedisAddr               string
+	LedgerAddr              string
+	RedisOptions            *redis.Options
+	LedgerOptions           *redis.Options
 	CacheTTL                time.Duration
 	APIKeyPepper            string
 	RequestTimeout          time.Duration
@@ -46,7 +52,20 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		MaxRequestBodyBytes:     64 << 10,
 		MaxConcurrentRequests:   16,
 		MaxConcurrentPerProject: 4,
-		Router:                  configuredRouter(getenv),
+		Router:                  router.Default(),
+	}
+	var err error
+	cfg.OpenAIAPIKey, err = redisconfig.Secret(getenv, "OPENAI_API_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.APIKeyPepper, err = redisconfig.Secret(getenv, "API_KEY_PEPPER")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Router, err = configuredRouter(getenv)
+	if err != nil {
+		return Config{}, err
 	}
 	if cfg.OpenAIAPIKey == "" {
 		return Config{}, fmt.Errorf("OPENAI_API_KEY not set")
@@ -55,6 +74,21 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		cfg.RedisAddr = defaultRedisAddr
 	}
 
+	cacheOptions, err := redisconfig.Options(getenv, "REDIS_", defaultRedisAddr)
+	if err != nil {
+		return Config{}, err
+	}
+	ledgerOptions, err := redisconfig.Options(getenv, "LEDGER_REDIS_", "localhost:6380")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.LedgerAddr = ledgerOptions.Addr
+	if cacheOptions.Username != "" || cacheOptions.Password != "" || cacheOptions.TLSConfig != nil {
+		cfg.RedisOptions = cacheOptions
+	}
+	if ledgerOptions.Username != "" || ledgerOptions.Password != "" || ledgerOptions.TLSConfig != nil {
+		cfg.LedgerOptions = ledgerOptions
+	}
 	ttl, err := cache.ParseTTL(getenv("CACHE_TTL"))
 	if err != nil {
 		return Config{}, err
@@ -91,27 +125,97 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	return cfg, nil
 }
 
-func configuredRouter(getenv func(string) string) router.Router {
+func configuredRouter(getenv func(string) string) (router.Router, error) {
 	r := router.Default()
-	if id := getenv("CHEAP_MODEL"); id != "" {
-		r.Cheap.ID = id
+	known := router.All()
+	var err error
+	r.Cheap, err = configuredModel(getenv, "CHEAP_", r.Cheap, known)
+	if err != nil {
+		return r, err
 	}
-	if id := getenv("POWERFUL_MODEL"); id != "" {
-		r.Powerful.ID = id
+	r.Powerful, err = configuredModel(getenv, "POWERFUL_", r.Powerful, known)
+	if err != nil {
+		return r, err
 	}
-	r.CheapFallback, r.PowerfulFallback = r.Cheap, r.Powerful
-	if id := getenv("CHEAP_FALLBACK_MODEL"); id != "" {
-		r.CheapFallback.ID = id
+	known = append(known, r.Cheap, r.Powerful)
+	r.CheapFallback, err = configuredModel(getenv, "CHEAP_FALLBACK_", r.Cheap, known)
+	if err != nil {
+		return r, err
 	}
-	if id := getenv("POWERFUL_FALLBACK_MODEL"); id != "" {
-		r.PowerfulFallback.ID = id
+	r.PowerfulFallback, err = configuredModel(getenv, "POWERFUL_FALLBACK_", r.Powerful, known)
+	if err != nil {
+		return r, err
 	}
-	return r
+	for _, a := range r.Models() {
+		if a.MaxOutputTokens <= 0 || a.MaxOutputTokens > 32768 {
+			return r, fmt.Errorf("invalid model output cap")
+		}
+		if _, _, err := a.Rates(); err != nil {
+			return r, err
+		}
+	}
+	list := []router.Model{r.Cheap, r.Powerful, r.CheapFallback, r.PowerfulFallback}
+	for _, a := range list {
+		for _, b := range list {
+			if a.ID == b.ID && (a.PriceIn != b.PriceIn || a.PriceOut != b.PriceOut || a.MaxOutputTokens != b.MaxOutputTokens) {
+				return r, fmt.Errorf("conflicting prices or output caps for model %s", a.ID)
+			}
+		}
+	}
+	return r, nil
+}
+
+func configuredModel(getenv func(string) string, prefix string, m router.Model, known []router.Model) (router.Model, error) {
+	id := getenv(prefix + "MODEL")
+	in, out, cap := getenv(prefix+"PRICE_IN"), getenv(prefix+"PRICE_OUT"), getenv(prefix+"MAX_OUTPUT_TOKENS")
+	if id != "" && id != m.ID {
+		found := false
+		for _, candidate := range known {
+			if candidate.ID == id {
+				m = candidate
+				found = true
+				break
+			}
+		}
+		if !found && (in == "" || out == "" || cap == "") {
+			return m, fmt.Errorf("%sMODEL override requires PRICE_IN, PRICE_OUT and MAX_OUTPUT_TOKENS", prefix)
+		}
+		m.ID = id
+	}
+	if (in == "") != (out == "") {
+		return m, fmt.Errorf("set both %sPRICE_IN and PRICE_OUT", prefix)
+	}
+	if in != "" {
+		if _, err := money.ParseUSD(in); err != nil {
+			return m, err
+		}
+		if _, err := money.ParseUSD(out); err != nil {
+			return m, err
+		}
+		var err error
+		m.PriceIn, err = strconv.ParseFloat(in, 64)
+		if err != nil {
+			return m, fmt.Errorf("invalid model input price")
+		}
+		m.PriceOut, err = strconv.ParseFloat(out, 64)
+		if err != nil {
+			return m, fmt.Errorf("invalid model output price")
+		}
+	}
+	if cap != "" {
+		var err error
+		m.MaxOutputTokens, err = strconv.Atoi(cap)
+		if err != nil {
+			return m, fmt.Errorf("invalid model output cap")
+		}
+	}
+	return m, nil
 }
 
 type Application struct {
 	Server *http.Server
 	redis  *redis.Client
+	ledger *redis.Client
 }
 
 func New(ctx context.Context, cfg Config) (*Application, error) {
@@ -119,43 +223,93 @@ func New(ctx context.Context, cfg Config) (*Application, error) {
 		return nil, err
 	}
 
-	// RediSearch's typed responses are stable under RESP2; go-redis still marks
-	// the RESP3 search response format as unstable.
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     cfg.RedisAddr,
-		Protocol: 2,
-	})
+	// RediSearch uses RESP2; billing owns a different Redis process.
+	cacheOptions := cfg.RedisOptions
+	if cacheOptions == nil {
+		cacheOptions = &redis.Options{Addr: cfg.RedisAddr, Protocol: 2}
+	}
+	ledgerOptions := cfg.LedgerOptions
+	if ledgerOptions == nil {
+		ledgerOptions = &redis.Options{Addr: cfg.LedgerAddr, Protocol: 2}
+	}
+	redisClient := redis.NewClient(cacheOptions)
+	ledgerClient := redis.NewClient(ledgerOptions)
+	cleanup := func() { redisClient.Close(); ledgerClient.Close() }
 	if err := redisClient.Ping(ctx).Err(); err != nil {
-		redisClient.Close()
-		return nil, fmt.Errorf("ping Redis: %w", err)
+		cleanup()
+		return nil, fmt.Errorf("ping cache Redis: %w", err)
+	}
+	if err := ledgerClient.Ping(ctx).Err(); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("ping ledger Redis: %w", err)
+	}
+	cacheInfo, err := redisClient.Info(ctx, "server").Result()
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("cache identity: %w", err)
+	}
+	ledgerInfo, err := ledgerClient.Info(ctx, "server").Result()
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("ledger identity: %w", err)
+	}
+	identity := func(info string) string {
+		for _, line := range strings.Split(info, "\n") {
+			if strings.HasPrefix(line, "run_id:") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "run_id:"))
+			}
+		}
+		return ""
+	}
+	if identity(cacheInfo) == "" || identity(ledgerInfo) == "" || identity(cacheInfo) == identity(ledgerInfo) {
+		cleanup()
+		return nil, fmt.Errorf("cache and ledger must use separate Redis processes")
+	}
+	keyStore := auth.NewKeyStore(ledgerClient, cfg.APIKeyPepper)
+	if err := keyStore.CheckLegacyKeys(ctx, redisClient); err != nil {
+		cleanup()
+		return nil, err
+	}
+	usageTracker := usage.NewTracker(ledgerClient)
+	if err := usageTracker.CheckLegacy(ctx, redisClient); err != nil {
+		cleanup()
+		return nil, err
 	}
 
 	semanticCache, err := cache.NewSemanticCache(
 		ctx,
 		redisClient,
-		cache.NewEmbeddingClient(cfg.OpenAIAPIKey),
+		cache.NewMeteredEmbeddingClient(cfg.OpenAIAPIKey, usageTracker, "cache_lookup"),
 		cfg.CacheTTL,
 	)
 	if err != nil {
-		redisClient.Close()
+		cleanup()
 		return nil, fmt.Errorf("create semantic cache: %w", err)
 	}
-	ragger, err := rag.New(ctx, redisClient, cache.NewEmbeddingClient(cfg.OpenAIAPIKey))
+	ragger, err := rag.New(ctx, redisClient, cache.NewMeteredEmbeddingClient(cfg.OpenAIAPIKey, usageTracker, "rag_lookup"))
 	if err != nil {
-		redisClient.Close()
+		cleanup()
 		return nil, fmt.Errorf("create RAG store: %w", err)
 	}
 
 	openAIClient := provider.NewOpenAIClient(cfg.OpenAIAPIKey)
-	keyStore := auth.NewKeyStore(redisClient, cfg.APIKeyPepper)
 	limiter := ratelimit.New(
 		ratelimit.NewRedisStore(redisClient),
 		ratelimit.DefaultConfig(),
 	)
-	usageTracker := usage.NewTracker(redisClient)
-	completions := completion.NewWithRouting(openAIClient, semanticCache, usageTracker, cfg.Router, ragger)
+	completions := completion.NewWithLedger(openAIClient, semanticCache, usageTracker, cfg.Router, ragger)
+	handlerAdapter := handler.New(completions, usageTracker, limiter)
+	handlerAdapter.Readiness(func(ctx context.Context) error {
+		if err := ledgerClient.Ping(ctx).Err(); err != nil {
+			return err
+		}
+		if err := redisClient.Do(ctx, "FT.INFO", "prompt_cache_v2").Err(); err != nil {
+			return err
+		}
+		return redisClient.Do(ctx, "FT.INFO", "project_rag_v1").Err()
+	})
 	httpHandler := handler.NewServer(
-		handler.New(completions, usageTracker, limiter),
+		handlerAdapter,
 		middleware.Auth(keyStore),
 		middleware.RateLimit(limiter),
 		middleware.RequestLimits(cfg.MaxRequestBodyBytes, cfg.RequestTimeout, cfg.MaxConcurrentRequests, cfg.MaxConcurrentPerProject),
@@ -166,12 +320,18 @@ func New(ctx context.Context, cfg Config) (*Application, error) {
 			Addr:    defaultListenAddr,
 			Handler: httpHandler,
 		},
-		redis: redisClient,
+		redis:  redisClient,
+		ledger: ledgerClient,
 	}, nil
 }
 
 func (a *Application) Close() error {
-	return a.redis.Close()
+	cacheErr := a.redis.Close()
+	ledgerErr := a.ledger.Close()
+	if cacheErr != nil {
+		return cacheErr
+	}
+	return ledgerErr
 }
 
 func validateConfig(cfg Config) error {
@@ -180,6 +340,8 @@ func validateConfig(cfg Config) error {
 		return fmt.Errorf("OPENAI_API_KEY not set")
 	case cfg.RedisAddr == "":
 		return fmt.Errorf("Redis address is required")
+	case cfg.LedgerAddr == "" || cfg.LedgerAddr == cfg.RedisAddr:
+		return fmt.Errorf("a separate ledger Redis address is required")
 	case cfg.CacheTTL <= 0:
 		return fmt.Errorf("cache TTL must be greater than zero")
 	case cfg.APIKeyPepper == "":

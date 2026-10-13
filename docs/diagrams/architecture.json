@@ -8,7 +8,7 @@
     "output": "docs/diagrams/architecture.html",
     "repository": {
       "url": "https://github.com/AshrafRah96/llm-gateway.git",
-      "revision": "49c1c6aab75c68f67281941060cd909501db9fd5",
+      "revision": "8154d082600eeaea0ba8a9db1feab28544bfe8f2",
       "provider": "github",
       "link_mode": "local-only"
     }
@@ -25,20 +25,20 @@
       ],
       "size": [
         180,
-        80
+        95
       ],
       "sources": [
         {
           "path": "internal/handler/chat.go",
-          "line": 32,
-          "end_line": 43,
-          "label": "HTTP endpoint registration"
+          "line": 39,
+          "end_line": 62,
+          "label": "Endpoint registration"
         },
         {
           "path": "internal/handler/stream.go",
           "line": 23,
           "end_line": 90,
-          "label": "SSE response delivery"
+          "label": "SSE delivery"
         }
       ]
     },
@@ -46,36 +46,36 @@
       "id": "ingress",
       "type": "security",
       "label": "HTTP admission",
-      "sublabel": "handler / middleware / auth",
+      "sublabel": "auth + quota + request bounds",
       "pos": [
         350,
         60
       ],
       "size": [
         220,
-        80
+        95
       ],
       "sources": [
         {
           "path": "internal/application/application.go",
-          "line": 149,
-          "end_line": 168,
-          "label": "Middleware composition"
+          "line": 268,
+          "end_line": 314,
+          "label": "Two-store admission composition"
         },
         {
-          "path": "internal/middleware/auth.go",
-          "line": 26,
-          "end_line": 46,
-          "label": "Project authentication gate"
+          "path": "internal/auth/keystore.go",
+          "line": 45,
+          "end_line": 83,
+          "label": "Expiry and project identity"
         },
         {
           "path": "internal/middleware/limits.go",
           "line": 10,
           "end_line": 48,
-          "label": "Body, deadline and concurrency"
+          "label": "Request bounds"
         }
       ],
-      "tag": "Auth \u2192 quota \u2192 resource limits"
+      "tag": "Project keys; quota and size gates"
     },
     {
       "id": "policy",
@@ -93,59 +93,59 @@
       "sources": [
         {
           "path": "internal/completion/completion.go",
-          "line": 129,
-          "end_line": 245,
-          "label": "Shared lifecycle and policy scope"
+          "line": 131,
+          "end_line": 183,
+          "label": "Project context and fail-open exceptions"
+        },
+        {
+          "path": "internal/completion/completion.go",
+          "line": 223,
+          "end_line": 284,
+          "label": "Chat and bounded failover"
         },
         {
           "path": "internal/completion/stream.go",
-          "line": 68,
-          "end_line": 218,
-          "label": "Streaming and settlement"
-        },
-        {
-          "path": "internal/router/router.go",
-          "line": 23,
-          "end_line": 61,
-          "label": "Primary and fallback selection"
+          "line": 69,
+          "end_line": 106,
+          "label": "Shared streaming selection"
         }
       ],
-      "tag": "Shared by /chat and /chat/stream"
+      "tag": "JSON/SSE; budget failures reject"
     },
     {
       "id": "access-state",
       "type": "database",
-      "label": "Redis \u00b7 access state",
-      "sublabel": "Key records + sliding windows",
+      "label": "Redis Stack \u00b7 quotas",
+      "sublabel": "Atomic key sliding windows",
       "pos": [
-        350,
-        240
+        30,
+        255
       ],
       "size": [
         220,
-        80
+        95
       ],
       "sources": [
-        {
-          "path": "internal/auth/keystore.go",
-          "line": 45,
-          "end_line": 76,
-          "label": "HMAC lookup and provisioning"
-        },
         {
           "path": "internal/ratelimit/redis.go",
           "line": 26,
           "end_line": 81,
-          "label": "Atomic quota and count"
+          "label": "Atomic quota decision"
         },
         {
           "path": "internal/middleware/ratelimit.go",
           "line": 12,
-          "end_line": 32,
-          "label": "Fail-closed quota gate"
+          "end_line": 34,
+          "label": "Quota fingerprint namespace"
+        },
+        {
+          "path": "docker-compose.yml",
+          "line": 1,
+          "end_line": 21,
+          "label": "Private TLS vector process"
         }
       ],
-      "tag": "Invalid key: 401 \u00b7 quota: 429"
+      "tag": "Disposable cache/quota process"
     },
     {
       "id": "context",
@@ -153,7 +153,7 @@
       "label": "Retrieval & semantic reuse",
       "sublabel": "rag + cache",
       "pos": [
-        350,
+        1140,
         430
       ],
       "size": [
@@ -171,16 +171,16 @@
           "path": "internal/cache/semantic.go",
           "line": 112,
           "end_line": 188,
-          "label": "Embed, lookup and write"
+          "label": "Embedding lookup and storage"
         },
         {
-          "path": "internal/cache/namespace.go",
-          "line": 22,
-          "end_line": 35,
-          "label": "Project + model + corpus scope"
+          "path": "internal/completion/completion.go",
+          "line": 137,
+          "end_line": 183,
+          "label": "Budget errors propagate"
         }
       ],
-      "tag": "Project-scoped; errors fail open"
+      "tag": "Ordinary errors allow ungrounded work"
     },
     {
       "id": "embedding-api",
@@ -188,22 +188,22 @@
       "label": "OpenAI embeddings",
       "sublabel": "text-embedding-3-small",
       "pos": [
-        30,
+        1500,
         430
       ],
       "size": [
-        195,
+        235,
         95
       ],
       "sources": [
         {
           "path": "internal/cache/embeddings.go",
-          "line": 12,
-          "end_line": 77,
-          "label": "Embedding API endpoint and call"
+          "line": 27,
+          "end_line": 136,
+          "label": "Metered bounded embedding API"
         }
       ],
-      "tag": "RAG and cache embed separately"
+      "tag": "128 KiB response; usage required"
     },
     {
       "id": "vectors",
@@ -211,12 +211,12 @@
       "label": "Redis \u00b7 vector state",
       "sublabel": "RAG chunks + response cache",
       "pos": [
-        350,
+        1140,
         665
       ],
       "size": [
-        220,
-        80
+        235,
+        95
       ],
       "sources": [
         {
@@ -243,11 +243,11 @@
     {
       "id": "provider",
       "type": "backend",
-      "label": "Provider adapter",
-      "sublabel": "provider/openai.go",
+      "label": "Metered provider adapter",
+      "sublabel": "completion + provider",
       "pos": [
-        750,
-        430
+        1500,
+        60
       ],
       "size": [
         235,
@@ -255,19 +255,19 @@
       ],
       "sources": [
         {
-          "path": "internal/provider/openai.go",
-          "line": 64,
-          "end_line": 140,
-          "label": "Structured requests and neutral SSE"
+          "path": "internal/completion/metered.go",
+          "line": 20,
+          "end_line": 96,
+          "label": "Chat reserve and settlement"
         },
         {
           "path": "internal/provider/openai.go",
-          "line": 150,
-          "end_line": 171,
-          "label": "Context-bound HTTP call"
+          "line": 64,
+          "end_line": 153,
+          "label": "Bounded JSON/SSE requests"
         }
       ],
-      "tag": "One configured pre-output fallback"
+      "tag": "Reserve before every chat attempt"
     },
     {
       "id": "chat-api",
@@ -275,71 +275,30 @@
       "label": "OpenAI chat API",
       "sublabel": "/v1/chat/completions",
       "pos": [
-        750,
-        665
+        1500,
+        255
       ],
       "size": [
         235,
-        80
-      ],
-      "sources": [
-        {
-          "path": "internal/provider/openai.go",
-          "line": 56,
-          "end_line": 99,
-          "label": "Chat endpoint and output caps"
-        },
-        {
-          "path": "internal/completion/completion.go",
-          "line": 213,
-          "end_line": 255,
-          "label": "Distinct conditional fallback"
-        }
-      ],
-      "tag": "JSON or upstream SSE"
-    },
-    {
-      "id": "accounting",
-      "type": "backend",
-      "label": "Usage & request logs",
-      "sublabel": "usage + observability",
-      "pos": [
-        1140,
-        60
-      ],
-      "size": [
-        230,
         95
       ],
       "sources": [
         {
-          "path": "internal/completion/completion.go",
-          "line": 189,
-          "end_line": 243,
-          "label": "Meter and log completed requests"
-        },
-        {
-          "path": "internal/completion/stream.go",
-          "line": 164,
-          "end_line": 218,
-          "label": "Idempotent bounded settlement"
-        },
-        {
-          "path": "internal/observability/logger.go",
-          "line": 9,
-          "end_line": 32,
-          "label": "Structured log output"
+          "path": "internal/provider/openai.go",
+          "line": 54,
+          "end_line": 140,
+          "label": "Chat endpoint and response caps"
         }
       ],
-      "tag": "Partial streams: labelled estimates"
+      "tag": "1 MiB JSON; 4 MiB cumulative SSE"
     },
     {
-      "id": "usage-state",
-      "type": "database",
-      "label": "Redis \u00b7 usage totals",
-      "sublabel": "Requests, tokens, cost by project",
+      "id": "accounting",
+      "type": "backend",
+      "label": "Budget & usage ledger",
+      "sublabel": "usage + money",
       "pos": [
-        1140,
+        750,
         430
       ],
       "size": [
@@ -349,24 +308,59 @@
       "sources": [
         {
           "path": "internal/usage/tracker.go",
-          "line": 44,
-          "end_line": 79,
-          "label": "Hash increments and reads"
+          "line": 78,
+          "end_line": 174,
+          "label": "Atomic reserve and identified settlement"
         },
         {
-          "path": "internal/handler/usage.go",
-          "line": 17,
-          "end_line": 35,
-          "label": "Project usage endpoint"
+          "path": "internal/usage/reconcile.go",
+          "line": 84,
+          "end_line": 155,
+          "label": "Evidence-based resolution"
         },
         {
-          "path": "internal/completion/completion.go",
-          "line": 258,
-          "end_line": 263,
-          "label": "Production metering identity"
+          "path": "internal/money/money.go",
+          "line": 1,
+          "end_line": 64,
+          "label": "Exact monetary units"
         }
       ],
-      "tag": "GET /usage reads project totals"
+      "tag": "UTC-day admission; integer charges"
+    },
+    {
+      "id": "usage-state",
+      "type": "database",
+      "label": "Persistent Redis ledger",
+      "sublabel": "Keys, events, totals, pending holds",
+      "pos": [
+        350,
+        430
+      ],
+      "size": [
+        230,
+        95
+      ],
+      "sources": [
+        {
+          "path": "docker-compose.yml",
+          "line": 23,
+          "end_line": 43,
+          "label": "Separate persistent ledger"
+        },
+        {
+          "path": "internal/auth/keystore.go",
+          "line": 45,
+          "end_line": 154,
+          "label": "Fingerprint lifecycle"
+        },
+        {
+          "path": "internal/usage/tracker.go",
+          "line": 78,
+          "end_line": 211,
+          "label": "Project financial state"
+        }
+      ],
+      "tag": "Separate process; TLS + ACL + AOF"
     },
     {
       "id": "prompt-boundary",
@@ -375,8 +369,8 @@
       "sublabel": "completion/input.go",
       "tag": "System policy; references + question",
       "pos": [
-        750,
-        255
+        1140,
+        60
       ],
       "size": [
         235,
@@ -387,19 +381,13 @@
           "path": "internal/completion/input.go",
           "line": 5,
           "end_line": 43,
-          "label": "Fixed policy and encoded data"
+          "label": "Fixed policy and encoded references"
         },
         {
           "path": "internal/completion/completion.go",
-          "line": 154,
-          "end_line": 159,
-          "label": "Policy-versioned cache scope"
-        },
-        {
-          "path": "internal/provider/openai.go",
-          "line": 64,
-          "end_line": 92,
-          "label": "Builder used by JSON and SSE"
+          "line": 159,
+          "end_line": 181,
+          "label": "Policy-versioned serving cache"
         }
       ]
     }
@@ -423,7 +411,7 @@
       "id": "auth-quota",
       "from": "ingress",
       "to": "access-state",
-      "label": "Lookup + Lua",
+      "label": "Quota Lua",
       "variant": "security"
     },
     {
@@ -465,14 +453,14 @@
       "id": "settle",
       "from": "policy",
       "to": "accounting",
-      "label": "Meter + log",
+      "label": "Chat admission",
       "variant": "default"
     },
     {
       "id": "usage-io",
       "from": "accounting",
       "to": "usage-state",
-      "label": "Increment totals",
+      "label": "Atomic holds + events",
       "variant": "default"
     },
     {
@@ -481,49 +469,61 @@
       "to": "provider",
       "label": "System + data",
       "variant": "security"
+    },
+    {
+      "id": "embedding-budget",
+      "from": "context",
+      "to": "accounting",
+      "label": "Embedding admission",
+      "variant": "security"
+    },
+    {
+      "id": "key-lookup",
+      "from": "ingress",
+      "to": "usage-state",
+      "label": "Key lookup",
+      "variant": "security"
     }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "Entry and ownership",
+      "title": "Admission and state",
       "items": [
-        "main starts application.New. Application validates configuration, owns Redis and composes :8080 HTTP. Startup: 10s. Shutdown: 30s. Sources: main.go:15\u201359; internal/application/application.go:117\u2013174.",
-        "/chat and /chat/stream share completion policy. /usage and /limits use the same admission gates; /health and /models are public. Sources: internal/handler/chat.go:32\u201343; internal/handler/limits.go:17\u201343."
+        "Authentication reads the persistent ledger. Quotas use separate vector/cache Redis. Body/deadline/concurrency limits precede generation. Runtime ACLs cannot administer keys or budgets. Sources: internal/application/application.go:268\u2013314; cmd/deployment-init/main.go:96\u2013105.",
+        "Compose pins images, enables private TLS/ACL connections, separates volumes and sets memory/CPU limits. /ready checks ledger and both Search indexes; no provider call. Sources: docker-compose.yml:1\u201391; internal/application/application.go:301\u2013310."
       ]
     },
     {
       "dot": "emerald",
-      "title": "Routing, retrieval and cache",
+      "title": "Retrieval and reuse",
       "items": [
-        "Route the original question before retrieval. Over 500 bytes or a complexity keyword selects the powerful tier. RAG filters project and active state before ranking; up to four chunks at similarity \u22650.80. Sources: internal/router/router.go:41\u201360; internal/rag/rag.go:22\u201331,116\u2013158.",
-        "RAG misses/errors continue ungrounded. Cache errors become misses. Cache similarity \u22650.95; default TTL 24h. A hit skips chat generation and usage increments but still requires embedding calls. Sources: internal/completion/completion.go:129\u2013210; internal/cache/semantic.go:18\u201324,112\u2013222.",
-        "Cache scope: project hash, primary routed model, schema, corpus revision and prompt-policy-v1. Fallback answers retain the original routed namespace. Sources: internal/cache/namespace.go:22\u201335; internal/completion/completion.go:157\u2013159,213\u2013242."
+        "Project-filtered RAG and cache each embed the question; cache hits avoid chat but retain embedding charges. Ordinary errors allow ungrounded work; budget errors reject. Sources: internal/completion/completion.go:137\u2013183; internal/cache/embeddings.go:54\u2013136.",
+        "Cache scope includes project, primary route, schema, corpus revision and prompt-policy-v1. Complete fallback answers keep that namespace; each paid attempt has its own charge. Sources: internal/completion/completion.go:167\u2013181,223\u2013270; internal/cache/namespace.go:22\u201335."
       ]
     },
     {
       "dot": "rose",
-      "title": "Prompt boundaries",
+      "title": "Prompt and provider boundaries",
       "items": [
-        "One fixed system policy. Optional JSON-encoded untrusted references in a user message. Original question in a separate user message. Input cannot create API roles or enter trusted policy. Source: internal/completion/input.go:5\u201343.",
-        "Same builder for JSON, SSE and fallback. No tools, classifier, phrase blocklist or output screening. Tests prove serialization and wiring; model-level resistance is unmeasured. Sources: internal/provider/openai.go:64\u201392; internal/completion/completion.go:213\u2013216; internal/completion/stream.go:80\u201389."
+        "Fixed system policy, JSON-encoded references, and separate user question share one builder across JSON/SSE/fallback. No tools, classifier, phrase blocklist, or output screening. Sources: internal/completion/input.go:5\u201343; internal/provider/openai.go:64\u2013104.",
+        "JSON/error reads: 1 MiB; embedding reads: 128 KiB; SSE: 4 MiB cumulative, 1 MiB per line. Oversized or incomplete responses never produce successful cache entries. Sources: internal/provider/openai.go:16\u201328,164\u2013194; internal/cache/embeddings.go:110\u2013136; internal/completion/stream.go:172\u2013227."
       ]
     },
     {
       "dot": "amber",
-      "title": "Fallback and settlement",
+      "title": "Financial lifecycle",
       "items": [
-        "Try one distinct configured fallback on transport error or HTTP 408/429/5xx before output. Cancellation/deadline errors do not retry. Defaults equal primary, so default routes do not retry. Sources: internal/application/application.go:94\u2013108; internal/completion/completion.go:213\u2013255; internal/completion/stream.go:80\u2013100.",
-        "Settle once at exhaustion or Close. Without provider usage, estimate policy, references, question and received output. Mark estimates; settlement outlives cancellation with a 5s budget. Cache only complete nonempty streams. Sources: internal/completion/input.go:46\u201351; internal/completion/stream.go:154\u2013240."
+        "Reserve before every chat/embedding call. Defaults: 100,000 tokens and US$10/project/UTC day. Integer nanodollars; immutable event IDs; unknown outcomes retain full reservations. Source: internal/usage/tracker.go:16\u201317,78\u2013174.",
+        "Provider usage settles known work. Abandonment records labelled estimates, preserves holds and closes upstream. Detached settlement: 5s. Explicit operator reconciliation appends evidence; audit repairs only validated aggregate snapshots. Sources: internal/completion/metered.go:33\u201343,137\u2013169; internal/usage/reconcile.go:84\u2013155,259\u2013345."
       ]
     },
     {
       "dot": "violet",
-      "title": "State and operator paths",
+      "title": "Operators and honest evidence",
       "items": [
-        "Redis boxes are logical groups in one configured Redis Stack instance. No persistent volume is declared in Compose. Key quotas use HMAC key ID; concurrency/RAG/cache/usage use project identity. Sources: internal/application/application.go:124\u2013161; docker-compose.yml:1\u201326; internal/middleware/ratelimit.go:15\u201329.",
-        "project-key provisions fingerprints. rag-import reads reviewed text; rag.Upload embeds and atomically replaces chunks while advancing corpus revision. Sources: cmd/project-key/main.go:18\u201345; cmd/rag-import/main.go:16\u201345; internal/rag/rag.go:55\u2013113.",
-        "cache-eval measures classification with real embeddings; provider-smoke checks a running gateway. Reports are opt-in, outside serving/normal CI. CI builds, vets, checks format/race tests, and rejects skipped Redis-backed tests. Sources: cmd/cache-eval/main.go:36\u201395; cmd/provider-smoke/main.go:56\u2013131; .github/workflows/ci.yml:8\u201372."
+        "project-key preserves binding, adds 90-day new expiry and 24h default overlap. Explicit key/usage migration preserves old records and totals. Backup/isolated restore scripts verify synthetic RDB/AOF recovery. Sources: cmd/project-key/main.go:24\u201391; internal/auth/migration.go:94\u2013146; internal/usage/reconcile.go:165\u2013235; scripts/ledger-restore-check.sh:1\u2013128.",
+        "Smoke/cache/adversarial tools are opt-in. Adversarial default prepares an unpaid report: fixed controls, three trials per JSON/SSE case. No paid/live resistance or invoice evidence measured. Sources: cmd/adversarial-eval/main.go:49\u2013161; docs/evaluation/adversarial-prepared-v1.md:1\u201313."
       ]
     }
   ]

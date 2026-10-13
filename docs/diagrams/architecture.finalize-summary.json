@@ -7,13 +7,13 @@
   "quality": "showcase",
   "specification": {
     "path": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.json",
-    "sha256": "a850c2a90a0e1f97a65a14042c565f09594500a527191c6eb79e7c9121270219",
-    "bytes": 15252
+    "sha256": "5d958c455d8df47639791ddd716188fc980b44304db78908f9b7d1d1c01cc8e9",
+    "bytes": 14684
   },
   "artifact": {
     "path": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.html",
-    "sha256": "ddd8b791d553ab2e437b5db4f8160523ef0d905bb9ac2d75de6c4c129a4e2409",
-    "bytes": 776997
+    "sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+    "bytes": 778706
   },
   "gates": {
     "validate": "pass",
@@ -28,9 +28,9 @@
     "truncated": false
   },
   "evidence": {
-    "receipt": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.finalize.json",
-    "summaryReceipt": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.finalize-summary.json",
-    "browserCheckReceipt": "/Users/ashrxh/Projects/llm-gateway/docs/diagrams/architecture.browser-check.json"
+    "receipt": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-publication-cleanup-20261013/final/architecture.finalize.json",
+    "summaryReceipt": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-publication-cleanup-20261013/final/architecture.finalize-summary.json",
+    "browserCheckReceipt": "/Users/ashrxh/Projects/llm-gateway/.archify/architecture-publication-cleanup-20261013/final/architecture.browser-check.json"
   },
   "update": {
     "status": "current",
@@ -43,5 +43,5 @@
     "noticeText": null
   },
   "visualReview": "not-requested",
-  "durationMs": 1781
+  "durationMs": 1500
 }

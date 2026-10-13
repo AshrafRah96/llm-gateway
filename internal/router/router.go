@@ -59,3 +59,25 @@ func (r Router) Route(prompt string) Decision {
 
 	return Decision{Primary: r.Cheap, Fallback: r.CheapFallback}
 }
+
+// Models advertises configured primary and fallback models with their actual policy caps.
+func (r Router) Models() []Model {
+	var result []Model
+	for _, m := range []Model{r.Cheap, r.Powerful, r.CheapFallback, r.PowerfulFallback} {
+		if m.ID == "" {
+			continue
+		}
+		found := false
+		for i, old := range result {
+			if old.ID == m.ID {
+				result[i].MaxOutputTokens = max(old.MaxOutputTokens, m.MaxOutputTokens)
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, m)
+		}
+	}
+	return result
+}

@@ -1,0 +1,10 @@
+# Operator access only; never publish these ports beyond loopback.
+services:
+  redis:
+    ports: [127.0.0.1:16380:6379]
+    networks: [state, operator-access]
+  ledger:
+    ports: [127.0.0.1:16381:6379]
+    networks: [state, operator-access]
+networks:
+  operator-access: {}

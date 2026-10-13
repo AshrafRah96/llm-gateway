@@ -1,24 +1,33 @@
 {
   "diagram_type": "architecture",
-  "artifact_sha256": "ddd8b791d553ab2e437b5db4f8160523ef0d905bb9ac2d75de6c4c129a4e2409",
-  "export_sha256": "b87d293498678ce41fc4811776d048c8052724826a0ea021c47e4746a3752249",
-  "visual_review": "passed",
-  "correction_rounds": 0,
+  "artifact_sha256": "a049d928ee7681ad4e6b22aa700c1b32021d8b1314d8f814c023d506170508c4",
+  "export_sha256": "a901de1929e2d92e5875c34e02d294c0a5636bdfd3c3d3f7367fbb146ad9d05c",
+  "visual_review": "not_requested",
+  "correction_rounds": 1,
   "reviewed_html_captures": [
     "1440x900 light",
     "1440x900 dark",
     "2048x1320 light",
     "2048x1320 dark"
   ],
+  "static_companion_review": [
+    "1600px light palette rendered with Resvg",
+    "1600px dark palette rendered with Resvg"
+  ],
   "observations": [
-    "No node/label overlap or line crossing in reviewed captures.",
-    "Prompt trust boundary and policy cache scope are present.",
-    "Canonical SVG contains all 12 components and 11 connections.",
-    "SVG inspected using a temporary renderer with its light CSS palette resolved; canonical SVG bytes unchanged.",
-    "Publication changed output paths only; SVG trailing whitespace normalized. No diagram geometry or labels changed."
+    "All 12 components and 13 relationships are present.",
+    "Reviewed node/label placement has no overlap or crossing.",
+    "Separate persistent ledger, paid-operation admission and response caps are visible.",
+    "Static SVG was rendered from scratch copies with CSS variables resolved; publication bytes were unchanged.",
+    "Trailing whitespace normalized after inspection; topology, geometry, labels and line numbers unchanged.",
+    "Document cleanup changed source identity only; prior visual inspection applies to unchanged diagram geometry."
   ],
   "limitations": [
+    "Static companion uses finalized HTML geometry and the existing standalone stylesheet; no new viewer-menu export.",
     "Hosted GitHub rendering was not tested.",
-    "Browser connector denied direct local-file README preview; no bypass was attempted."
-  ]
+    "Browser connector local-file restriction was not bypassed."
+  ],
+  "captures_artifact_sha256": "d374e5c400c13cfd4eaabc8c637b4e2777a47ce3a6f2a618cc9dccca90722e51",
+  "review_basis": "Previous captures inspected unchanged geometry. Current source metadata/citation passed automated browser checks; changed card text was not recaptured.",
+  "previous_geometry_review": "passed"
 }
